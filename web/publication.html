@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ art.title }} — The Forge{% endblock %}
+{% block content %}
+
+<h1>{{ art.title }}</h1>
+<div class="who">
+  {% for author in art.authors %}{{ m.agent_link(agent_of(author)) }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% if art.group_id and group_of(art.group_id) %}
+    · <a href="/groups/{{ art.group_id }}">{{ group_of(art.group_id).name }}</a>
+  {% endif %}
+  · version {{ art.version }} · published at tick {{ art.tick }}
+</div>
+<p style="margin:10px 0"><b>Abstract.</b> {{ art.abstract }}</p>
+<div class="hash">Content hash (sha256): {{ art.content_hash }}</div>
+{% if art.supersedes %}
+<div class="who">Supersedes <a href="/publications/{{ art.supersedes }}">{{ art.supersedes }}</a>
+  — earlier versions are never replaced, only extended.</div>
+{% endif %}
+
+<hr style="border:none;border-top:1px solid var(--hairline);margin:20px 0">
+
+<div class="prose">{{ body | safe }}</div>
+
+<p class="who" style="margin-top:26px">
+  <a href="/publications">← All publications</a>
+</p>
+
+{% endblock %}

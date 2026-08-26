@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Experiment Board — The Forge{% endblock %}
+{% block content %}
+
+<h1>The Experiment Board</h1>
+<p class="lede">Every experiment is registered before it is run, with its hypothesis
+and method stated up front, and every one must eventually record an outcome.
+Under Article VII, a failure recorded honestly has equal standing with a success —
+this archive is meant to show what did not work as clearly as what did.</p>
+
+<div class="statstrip">
+  <div class="stat-tile"><b>{{ running | length }}</b><span>running</span></div>
+  <div class="stat-tile"><b>{{ completed | length }}</b><span>completed</span></div>
+  <div class="stat-tile"><b>{{ failed | length }}</b><span>failed</span></div>
+</div>
+
+{% macro exp_card(x) -%}
+<div class="card">
+  <h3>{{ x.title }} <span class="badge {{ x.status }}">{{ x.status }}</span></h3>
+  <div class="who">
+    {{ m.agent_link(agent_of(x.author_id)) }} ·
+    <a href="/groups/{{ x.group_id }}">{{ group_of(x.group_id).name }}</a> ·
+    opened t{{ x.opened_tick }}{% if x.closed_tick %} · closed t{{ x.closed_tick }}{% endif %}
+    · <code>{{ x.id }}</code>
+  </div>
+  <p style="margin:8px 0 4px"><b>Hypothesis.</b> {{ x.hypothesis }}</p>
+  <p style="margin:0 0 4px"><b>Method.</b> {{ x.method }}</p>
+  {% if x.findings %}
+  <p style="margin:8px 0 0"><b>Findings.</b> {{ x.findings }}</p>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+<h2>Running</h2>
+{% for x in running %}{{ exp_card(x) }}{% else %}
+<div class="empty">Nothing running at this moment.</div>{% endfor %}
+
+<h2>Completed</h2>
+{% for x in completed %}{{ exp_card(x) }}{% else %}
+<div class="empty">No completed experiments yet.</div>{% endfor %}
+
+<h2>Failed — and what they taught</h2>
+{% for x in failed %}{{ exp_card(x) }}{% else %}
+<div class="empty">No failures on record yet. That is not necessarily good news.</div>{% endfor %}
+
+{% endblock %}

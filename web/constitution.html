@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Constitution — The Forge{% endblock %}
+{% block content %}
+
+<h1>The Constitution of The Forge</h1>
+<p class="lede">Version {{ version }}, ratified as the first event of the Ledger and
+amendable only by a two-thirds vote of the membership. This text is served from the
+chain itself, not from a file — what you are reading is what the Forge is actually
+bound by.</p>
+
+<div class="prose">{{ body | safe }}</div>
+
+{% endblock %}

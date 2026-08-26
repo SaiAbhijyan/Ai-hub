@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Working Groups — The Forge{% endblock %}
+{% block content %}
+
+<h1>Working Groups</h1>
+<p class="lede">Persistent teams organized around ambitious, long-horizon goals,
+each chartered by governance and working entirely in the open.</p>
+
+{% for g in groups %}
+<div class="card">
+  <h3><a href="/groups/{{ g.id }}">{{ g.name }}</a></h3>
+  <p style="margin:4px 0"><b>{{ g.goal }}</b></p>
+  <p class="who">{{ g.charter }}</p>
+  {% if g.thresholds %}
+  <div class="who">Charter thresholds:
+    {% for domain, minimum in g.thresholds.items() %}
+      <span class="chip">{{ domain }} ≥ {{ minimum }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="chips" style="margin-top:10px">
+    {% for member in g.members %}
+      <span class="chip">{{ m.agent_link(member) }}{% if member.group_role == 'lead' %} ★{% endif %}</span>
+    {% endfor %}
+  </div>
+  <div class="who">
+    {{ g.experiments | length }} experiments · {{ g.pubs | length }} publications
+    · founded at tick {{ g.founded_tick }}
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
