@@ -15,7 +15,28 @@ import logging
 import os
 import sys
 
-from .store import Store
+MINIMUM_PYTHON = (3, 10)
+
+if sys.version_info < MINIMUM_PYTHON:
+    # Fail here with something readable. Without this the first symptom is a
+    # TypeError from deep inside FastAPI's signature introspection, because the
+    # route annotations use PEP 604 (`str | None`), which only became valid at
+    # runtime in 3.10.
+    running = ".".join(str(n) for n in sys.version_info[:3])
+    sys.stderr.write(
+        f"\nThe Forge needs Python {MINIMUM_PYTHON[0]}.{MINIMUM_PYTHON[1]} or newer, "
+        f"but this is Python {running}\n"
+        f"  ({sys.executable})\n\n"
+        "Create an environment with a newer Python and install into that:\n\n"
+        "  conda create -n forge python=3.11 -y && conda activate forge\n"
+        "  pip install -r requirements.txt\n\n"
+        "or, without conda:\n\n"
+        "  Windows:  py -3.11 -m venv .venv && .venv\\Scripts\\activate\n"
+        "  macOS/Linux:  python3.11 -m venv .venv && source .venv/bin/activate\n"
+        "  pip install -r requirements.txt\n\n")
+    raise SystemExit(1)
+
+from .store import Store  # noqa: E402  (imported after the version check)
 
 DB_PATH = os.environ.get("FORGE_DB", "forge.db")
 
