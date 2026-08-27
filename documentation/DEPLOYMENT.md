@@ -14,12 +14,45 @@ Everything below is what makes it live.
 ## 1. Run it locally (one minute)
 
 **Requires Python 3.10 or newer** (developed and tested on 3.11; the Docker image
-pins 3.11). Check with `python3 --version`.
+pins 3.11). Check first — this is the single most common way to get stuck:
 
-Use a virtual environment. On macOS with Homebrew Python, and on Ubuntu 23.04+,
-Debian 12+ and Fedora, a bare `pip install` into the system Python is refused with
-`error: externally-managed-environment` — a venv sidesteps that and keeps the
-Forge's dependencies out of your system Python either way.
+```bash
+python --version      # Windows
+python3 --version     # macOS / Linux
+```
+
+Anaconda's base environment is often Python 3.9, which is **too old**. The route
+annotations use `str | None`, which only became valid at runtime in 3.10, so on 3.9
+the app aborts with an explanatory message.
+
+**Always install into an isolated environment**, never your base one. Besides the
+usual reasons, the Forge pins modern FastAPI and Pydantic 2 — installing those into
+a shared environment can silently upgrade Pydantic from 1.x and break unrelated
+projects that use it.
+
+### Windows
+
+```bat
+git clone https://github.com/SaiAbhijyan/Ai-hub.git
+cd Ai-hub
+git checkout claude/open-ended-project-v3ff92
+
+py -3.11 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+
+set FORGE_ADMIN_TOKEN=<your token>
+set FORGE_ADMIN_NAME=Sai
+python -m forge run
+```
+
+If `py -3.11` is not found, install Python 3.11+ from python.org (tick *"Add
+Python to PATH"*), or use conda: `conda create -n forge python=3.11 -y` then
+`conda activate forge`.
+
+Note that on Windows `python3` is usually not a command — it is `python` or `py`.
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/SaiAbhijyan/Ai-hub.git
@@ -27,16 +60,38 @@ cd Ai-hub
 git checkout claude/open-ended-project-v3ff92
 
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 
 FORGE_ADMIN_TOKEN='<your token>' FORGE_ADMIN_NAME='Sai' python -m forge run
 ```
 
-To stop it, press Ctrl-C. To come back later, `cd` into the directory,
-`source .venv/bin/activate`, and run the last line again — the ledger in
-`forge.db` is picked up where it left off, so the Forge resumes its history
-rather than starting over.
+On macOS with Homebrew Python, and on Ubuntu 23.04+, Debian 12+ and Fedora, a bare
+`pip install` into the system Python is refused with
+`error: externally-managed-environment`. The venv sidesteps that.
+
+### Do not keep the ledger in a synced folder
+
+Clone somewhere outside OneDrive, Dropbox, iCloud Drive or Google Drive — for
+example `C:\dev\Ai-hub` or `~/code/Ai-hub`.
+
+The Forge keeps its ledger in SQLite in WAL mode and writes to it continuously. A
+sync client can copy the database and its `-wal` sidecar mid-transaction, which
+causes `database is locked` errors at best and a corrupted ledger at worst. The
+ledger is the institution's entire memory; it is not worth the risk.
+
+If you have already cloned into a synced folder, either move the directory, or
+point the ledger somewhere else and leave the code where it is:
+
+```bat
+set FORGE_DB=C:\dev\forge\forge.db
+```
+
+### Afterwards
+
+Ctrl-C stops it. To come back later, `cd` into the directory, re-activate the
+environment, and run the last line again — the ledger in `forge.db` is picked up
+where it left off, so the Forge resumes its history rather than starting over.
 
 Then open:
 

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 
@@ -363,6 +364,43 @@ def test_aide_can_never_act_on_the_forge(seeded):
                       "record_result", "join_group", "run_drill"):
         err = validate(seeded, "aide", forbidden, {})
         assert err and "may not" in err, forbidden
+
+
+def test_python_version_guard_fires_before_any_import():
+    """On Python 3.9 the app must say so plainly.
+
+    Without the guard the first symptom is a TypeError from inside FastAPI's
+    signature introspection — the route annotations use `str | None`, which is
+    only valid at runtime from 3.10 — and that error names nothing useful.
+    The guard must therefore run before the first package import.
+    """
+    import pathlib
+
+    source = pathlib.Path("forge/__main__.py").read_text()
+    guard_at = source.index("if sys.version_info < MINIMUM_PYTHON")
+    first_package_import = source.index("from .store import")
+    assert guard_at < first_package_import, \
+        "the version guard must precede the first package import"
+    assert "MINIMUM_PYTHON = (3, 10)" in source
+
+    # The guard exits with guidance rather than raising.
+    block = source[source.index("MINIMUM_PYTHON"):first_package_import]
+    captured = io.StringIO()
+    fake_sys = type("s", (), {"version_info": (3, 9, 21),
+                              "executable": "/usr/bin/python3.9",
+                              "stderr": captured})()
+    with pytest.raises(SystemExit) as exc:
+        exec(block, {"sys": fake_sys})
+    assert exc.value.code == 1
+    message = captured.getvalue()
+    assert "3.10 or newer" in message and "3.9.21" in message
+    assert "py -3.11" in message           # Windows path
+    assert "python3.11 -m venv" in message  # Unix path
+
+    # And it is a no-op on a supported version.
+    ok_sys = type("s", (), {"version_info": (3, 11, 0), "executable": "x",
+                            "stderr": io.StringIO()})()
+    exec(block, {"sys": ok_sys})
 
 
 def test_admin_token_is_required(monkeypatch):
