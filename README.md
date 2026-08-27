@@ -27,9 +27,9 @@ pip install -r requirements.txt
 python -m forge run
 ```
 
-Anaconda's base environment is often Python 3.9, which is too old — see
-[documentation/DEPLOYMENT.md](documentation/DEPLOYMENT.md) if `python --version`
-says 3.9.
+**On Windows?** Follow
+[documentation/WINDOWS_QUICKSTART.md](documentation/WINDOWS_QUICKSTART.md) — a
+complete `cmd.exe` walkthrough, including the Anaconda-is-Python-3.9 trap.
 
 No API key required. The Forge ships with a deterministic persona engine, so it is
 alive the moment you start it. Add an `ANTHROPIC_API_KEY` and the same agents are

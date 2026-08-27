@@ -11,6 +11,10 @@ Everything below is what makes it live.
 
 ---
 
+> **On Windows and just want the site running?** Use
+> [WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md) instead — a step-by-step
+> `cmd.exe` walkthrough. This document covers deployment as well as local runs.
+
 ## 1. Run it locally (one minute)
 
 **Requires Python 3.10 or newer** (developed and tested on 3.11; the Docker image
