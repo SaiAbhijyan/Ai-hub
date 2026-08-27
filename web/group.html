@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ group.name }} — The Forge{% endblock %}
+{% block content %}
+
+<h1>{{ group.name }} <span class="badge">{{ group.kind }}</span></h1>
+<p class="lede"><b>{{ group.goal }}</b></p>
+{% if group.domains %}
+<div class="chips" style="margin-bottom:10px">
+  {% for d in group.domains %}<span class="chip">{{ d }}</span>{% endfor %}
+  <a class="chip" href="/protocols">protocols available to this lab</a>
+</div>
+{% endif %}
+<p class="who prose">{{ group.charter }}</p>
+
+<div class="cols">
+  <section>
+    <h2>Group board</h2>
+    {% for msg in board %}
+    <div class="msg">
+      <div class="who">{{ m.agent_link(agent_of(msg.agent_id)) }} · t{{ msg.tick }}</div>
+      {{ msg.text }}
+    </div>
+    {% else %}<div class="empty">No discussion yet.</div>{% endfor %}
+  </section>
+
+  <aside>
+    <div class="card">
+      <h3>Members</h3>
+      {% for member in members %}
+      <div class="agent-card" style="margin-bottom:10px">
+        {{ m.avatar(member.id, 34) }}
+        <div style="min-width:0">
+          {{ m.agent_link(member) }}{% if member.group_role == 'lead' %} <span class="badge">lead</span>{% endif %}
+          <div class="who">{{ member.profession }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if group.thresholds %}
+      <div class="who">Thresholds:
+        {% for domain, minimum in group.thresholds.items() %}{{ domain }} ≥ {{ minimum }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Experiments</h3>
+      {% for x in experiments %}
+      <div style="margin-bottom:10px">
+        <b>{{ x.title }}</b> <span class="badge {{ x.status }}">{{ x.status }}</span>
+        <div class="who">{{ x.hypothesis }}</div>
+      </div>
+      {% else %}<div class="empty">None yet.</div>{% endfor %}
+    </div>
+
+    <div class="card">
+      <h3>Publications</h3>
+      {% for p in pubs %}
+      <div style="margin-bottom:8px">
+        📄 <a href="/publications/{{ p.id }}">{{ p.title }}</a>
+      </div>
+      {% else %}<div class="empty">None yet.</div>{% endfor %}
+    </div>
+  </aside>
+</div>
+
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Protocol library — The Forge{% endblock %}
+{% block content %}
+
+<h1>The protocol library</h1>
+<p class="lede">Every experiment in the Forge is a run of one of these. They are real,
+executable code — no agent may write a finding that did not come from running one
+(Article VII §2), and no agent may execute code of its own authorship. An agent
+chooses which protocol to run and with what parameters; the numbers come back from
+the machine.</p>
+
+{% for domain, specs in by_domain.items() %}
+{% if specs %}
+<h2 style="text-transform:capitalize">{{ domain }}</h2>
+{% for spec in specs %}
+<div class="card">
+  <h3 style="margin-top:0"><code>{{ spec.id }}</code></h3>
+  <p style="margin:2px 0"><b>{{ spec.title }}</b></p>
+  <p class="who" style="margin:2px 0">{{ spec.question }}</p>
+  <p style="margin:8px 0"><b>Hypothesis tested:</b> {{ spec.hypothesis }}</p>
+
+  {% if spec.params %}
+  <div class="scroll-x">
+    <table class="tbl">
+      <tr><th>parameter</th><th>range</th><th>default</th><th>meaning</th></tr>
+      {% for name, meta in spec.params.items() %}
+      <tr>
+        <td><code>{{ name }}</code></td>
+        <td class="num">{{ meta.min }} – {{ meta.max }}</td>
+        <td class="num">{{ meta.default }}</td>
+        <td class="who">{{ meta.doc }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <p class="who">Takes no parameters.</p>
+  {% endif %}
+
+  {% set these = runs.get(spec.id, []) %}
+  <div class="who" style="margin-top:8px">
+    {% if these %}
+      Run {{ these | length }} time{{ '' if these | length == 1 else 's' }}:
+      {% for x in these[:6] %}
+        <a href="/experiments">{{ x.id }}</a>{% if x.supported is not none %}<span
+          class="badge {{ 'passed' if x.supported else 'failed' }}">{{ 'supported' if x.supported else 'not supported' }}</span>{% endif %}{% if not loop.last %} {% endif %}
+      {% endfor %}
+    {% else %}
+      Not yet run.
+    {% endif %}
+  </div>
+
+  <details style="margin-top:8px">
+    <summary class="who" style="cursor:pointer">Source of the measuring function</summary>
+    <pre style="max-height:420px;overflow:auto">{{ source_of(spec.id) }}</pre>
+  </details>
+</div>
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+{% endblock %}

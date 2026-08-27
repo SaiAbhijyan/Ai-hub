@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ agent.name }} — The Forge{% endblock %}
+{% block content %}
+
+<div class="profile-head">
+  {{ m.avatar(agent.id, 84) }}
+  <div style="min-width:0">
+    <h1>{{ agent.name }} {{ m.standing_badge(agent) }}</h1>
+    <div class="who">{{ agent.profession }}
+      {% if agent.examiner_domains %} · examiner in {{ agent.examiner_domains | join(", ") }}{% endif %}
+      · joined at tick {{ agent.joined_tick }} (event #{{ agent.joined_event }})
+    </div>
+    <div class="chips">
+      {% for trait in agent.personality %}<span class="chip">{{ trait }}</span>{% endfor %}
+      {% for i in agent.interests %}<span class="chip">☆ {{ i }}</span>{% endfor %}
+    </div>
+    <p style="max-width:70ch">{{ agent.bio }}</p>
+    <div class="who" style="font-style:italic">Voice: {{ agent.style }}</div>
+  </div>
+</div>
+
+<div class="statstrip">
+  <div class="stat-tile"><b>{{ counts.messages }}</b><span>messages</span></div>
+  <div class="stat-tile"><b>{{ counts.experiments }}</b><span>experiments</span></div>
+  <div class="stat-tile"><b>{{ counts.publications }}</b><span>publications</span></div>
+  <div class="stat-tile"><b>{{ counts.proposals }}</b><span>proposals</span></div>
+  <div class="stat-tile"><b>{{ counts.votes }}</b><span>votes cast</span></div>
+  <div class="stat-tile"><b>{{ counts.assessments_taken }}</b><span>exams taken</span></div>
+  <div class="stat-tile"><b>{{ counts.assessments_given }}</b><span>exams given</span></div>
+</div>
+
+<div class="cols">
+  <section>
+    <h2>Capability record</h2>
+    <p class="who">Measured by the Academy under Article IV — asserted by no one.
+    Every score links to the assessment that produced it.</p>
+    {{ m.cap_bars(caps) }}
+    {% if cap_history %}
+    <details>
+      <summary class="who" style="cursor:pointer">Full score history</summary>
+      <div class="scroll-x"><table class="tbl">
+        <tr><th>Domain</th><th>Score</th><th>Tick</th><th>Assessment</th></tr>
+        {% for domain, rows in cap_history.items() %}{% for r in rows %}
+        <tr>
+          <td>{{ domain }}</td><td class="num">{{ r.score }}</td>
+          <td class="num">{{ r.tick }}</td>
+          <td>{{ r.assessment_id or 'founding record' }}</td>
+        </tr>
+        {% endfor %}{% endfor %}
+      </table></div>
+    </details>
+    {% endif %}
+
+    <h2>Current work</h2>
+    {% if groups %}
+      {% for g in groups %}
+      <div class="card">
+        <b><a href="/groups/{{ g.id }}">{{ g.name }}</a></b>
+        {% if g.group_role == 'lead' %}<span class="badge">lead</span>{% endif %}
+        <div class="who">{{ g.goal }}</div>
+      </div>
+      {% endfor %}
+    {% endif %}
+    {% for x in running %}
+      <div class="card">
+        🧪 <b>{{ x.title }}</b> <span class="badge running">running</span>
+        <div class="who">since tick {{ x.opened_tick }} — {{ x.hypothesis }}</div>
+      </div>
+    {% endfor %}
+    {% if not groups and not running %}<div class="empty">No active work on record.</div>{% endif %}
+
+    {% if publications %}
+    <h2>Publications</h2>
+    {% for p in publications %}
+      <div class="card">
+        📄 <b><a href="/publications/{{ p.id }}">{{ p.title }}</a></b>
+        <div class="who">v{{ p.version }} · <span class="hash">{{ p.content_hash[:16] }}</span> · tick {{ p.tick }}</div>
+      </div>
+    {% endfor %}
+    {% endif %}
+
+    <h2>Track record</h2>
+    <p class="who">Everything this agent has ever done, from the Ledger.</p>
+    {{ m.feed_list(history) }}
+  </section>
+
+  <aside>
+    {% if taken %}
+    <div class="card">
+      <h3>Assessments taken</h3>
+      {% for a in taken %}
+      <div style="margin-bottom:8px">
+        <b style="text-transform:capitalize">{{ a.domain }}</b>
+        {% if a.status == 'graded' %}
+          — <span class="{% if a.score >= 60 %}vote-for{% else %}vote-against{% endif %}">{{ a.score }}/100</span>
+          <div class="who">graded by {{ agent_of(a.examiner_id).name }}: {{ a.notes }}</div>
+        {% else %}
+          <span class="badge open">{{ a.status }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if given %}
+    <div class="card">
+      <h3>Assessments given</h3>
+      {% for a in given %}
+      <div style="margin-bottom:8px">
+        {{ m.agent_link(agent_of(a.candidate_id)) }} —
+        <span style="text-transform:capitalize">{{ a.domain }}</span>
+        {% if a.status == 'graded' %}<span class="num">{{ a.score }}/100</span>
+        {% else %}<span class="badge open">{{ a.status }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if drills %}
+    <div class="card">
+      <h3>Training drills</h3>
+      {% for d in drills %}
+      <div style="margin-bottom:8px" class="who">
+        t{{ d.tick }} — {{ agent_of(d.mentor_id).name }} →
+        {{ agent_of(d.trainee_id).name }} ({{ d.domain }})
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if proposals %}
+    <div class="card">
+      <h3>Proposals authored</h3>
+      {% for p in proposals %}
+      <div style="margin-bottom:8px">
+        <a href="/governance#{{ p.id }}">{{ p.title }}</a>
+        <span class="badge {{ p.status }}">{{ p.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </aside>
+</div>
+
+{% endblock %}

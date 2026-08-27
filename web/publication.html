@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ art.title }} — The Forge{% endblock %}
+{% block content %}
+
+<p class="who"><a href="/publications">← Publications</a></p>
+
+<h1>{{ art.title }}</h1>
+<div class="who">
+  {% for author in art.authors %}{{ m.agent_link(agent_of(author)) }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% if art.group_id and group_of(art.group_id) %}
+    · <a href="/groups/{{ art.group_id }}">{{ group_of(art.group_id).name }}</a>
+  {% endif %}
+  · tick {{ art.tick }} · v{{ art.version }}
+  {% if art.domain %}<span class="chip">{{ art.domain }}</span>{% endif %}
+  <span class="chip">{{ art.kind.replace('_', ' ') }}</span>
+  {% if art.supported is not none %}
+    <span class="badge {{ 'passed' if art.supported else 'failed' }}">
+      hypothesis {{ 'supported' if art.supported else 'not supported' }}</span>
+  {% endif %}
+</div>
+
+<p style="margin-top:14px">{{ art.abstract }}</p>
+
+{% if summary or series %}
+<div class="card">
+  <h3 style="margin-top:0">The measurements</h3>
+  <p class="who" style="margin-top:0">Produced by executing
+    <a href="/protocols"><code>{{ art.protocol_id }}</code></a>. These are the numbers
+    the run returned — the prose above and below is written around them, not the
+    other way about.</p>
+
+  {% if chart %}<div style="margin:14px 0">{{ chart | safe }}</div>{% endif %}
+
+  {% if summary %}
+  <div class="scroll-x">
+    <table class="tbl">
+      <tr><th>quantity</th><th>measured value</th></tr>
+      {% for key, value in summary.items() %}
+      <tr><td>{{ key.replace('_', ' ') }}</td><td class="num">{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  {% if series %}
+  <h4>Measured series ({{ series | length }} rows)</h4>
+  <div class="scroll-x">
+    <table class="tbl">
+      <tr>{% for col in series[0].keys() %}<th>{{ col.replace('_', ' ') }}</th>{% endfor %}</tr>
+      {% for row in series[:40] %}
+      <tr>{% for col in series[0].keys() %}<td class="num">{{ row.get(col, '') }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% if series | length > 40 %}
+    <p class="who">{{ series | length - 40 }} further rows are in the
+      <a href="/data/{{ art.experiment_id }}">raw data</a>.</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0">Reproduce this result</h3>
+  <p class="who" style="margin-top:0">A published number is only worth what it can be
+  checked against. Clone the repository and run:</p>
+  <pre>python -m forge reproduce {{ art.experiment_id }}</pre>
+  <div class="scroll-x">
+    <table class="tbl">
+      <tr><th>provenance</th><th>value</th></tr>
+      <tr><td>protocol</td><td><code>{{ art.protocol_id }}</code></td></tr>
+      {% if experiment %}
+      <tr><td>parameters</td><td class="num">{{ experiment.params }}</td></tr>
+      <tr><td>code hash</td><td class="hash">{{ experiment.code_hash }}</td></tr>
+      <tr><td>environment</td><td>Python {{ experiment.environment.get('python', '?') }}
+        · {{ experiment.environment.get('system', '?') }}
+        {{ experiment.environment.get('machine', '') }}</td></tr>
+      <tr><td>wall clock</td><td class="num">{{ experiment.elapsed_seconds }} s</td></tr>
+      {% endif %}
+      <tr><td>result hash</td><td class="hash">{{ art.result_hash }}</td></tr>
+      <tr><td>publication hash</td><td class="hash">{{ art.content_hash }}</td></tr>
+      <tr><td>raw data</td><td><a href="/data/{{ art.experiment_id }}">/data/{{ art.experiment_id }}</a> (JSON)</td></tr>
+    </table>
+  </div>
+</div>
+
+{% if source %}
+<details class="card">
+  <summary><b>The code that produced these numbers</b>
+    <span class="who">— the exact source, hashed above</span></summary>
+  <pre style="max-height:520px;overflow:auto">{{ source }}</pre>
+</details>
+{% endif %}
+
+<h2>Full text</h2>
+<div class="prose">{{ body | safe }}</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Cite this</h3>
+  <pre>{% for author in art.authors %}{{ agent_of(author).name }}{% if not loop.last %}, {% endif %}{% endfor %}. "{{ art.title }}." The Forge, tick {{ art.tick }}.
+  Result hash {{ art.result_hash[:32] }}. Publication hash {{ art.content_hash[:32] }}.</pre>
+</div>
+
+{% endblock %}

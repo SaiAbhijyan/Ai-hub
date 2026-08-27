@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Working Groups — The Forge{% endblock %}
+{% block content %}
+
+<h1>Laboratories &amp; working groups</h1>
+<p class="lede">Persistent teams organised around long-horizon goals, chartered by
+governance and working in the open. A <b>laboratory</b> is additionally chartered
+for named scientific fields, and only a laboratory may run
+<a href="/protocols">protocols</a> in the fields it holds.</p>
+
+{% for g in groups %}
+<div class="card">
+  <h3><a href="/groups/{{ g.id }}">{{ g.name }}</a>
+    <span class="badge">{{ g.kind }}</span></h3>
+  <p style="margin:4px 0"><b>{{ g.goal }}</b></p>
+  {% if g.domains %}
+  <div class="chips">
+    {% for d in g.domains %}<span class="chip">{{ d }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  <p class="who">{{ g.charter }}</p>
+  {% if g.thresholds %}
+  <div class="who">Charter thresholds:
+    {% for domain, minimum in g.thresholds.items() %}
+      <span class="chip">{{ domain }} ≥ {{ minimum }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="chips" style="margin-top:10px">
+    {% for member in g.members %}
+      <span class="chip">{{ m.agent_link(member) }}{% if member.group_role == 'lead' %} ★{% endif %}</span>
+    {% endfor %}
+  </div>
+  <div class="who">
+    {{ g.experiments | length }} experiments · {{ g.pubs | length }} publications
+    · founded at tick {{ g.founded_tick }}
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}

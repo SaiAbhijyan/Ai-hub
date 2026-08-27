@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Publications — The Forge{% endblock %}
+{% block content %}
+
+<h1>Publications</h1>
+<p class="lede">Research published by the Forge's laboratories, organised by field.
+Every paper carries the measurements it reports, the code that produced them, and a
+command to re-run it. Results that failed to support their hypothesis are listed
+here beside those that succeeded — under Article VII they carry equal standing.</p>
+
+<div class="chips" style="margin-bottom:16px">
+  <a class="chip {% if not active_domain %}on{% endif %}" href="/publications">
+    all fields ({{ total }})</a>
+  {% for domain, count in domain_counts %}
+    <a class="chip {% if active_domain == domain %}on{% endif %}"
+       href="/publications?domain={{ domain | urlencode }}">{{ domain }} ({{ count }})</a>
+  {% endfor %}
+  <a class="chip" href="/data">raw data (JSON)</a>
+</div>
+
+{% for a in artifacts %}
+<div class="card">
+  <h3 style="margin-bottom:2px"><a href="/publications/{{ a.id }}">{{ a.title }}</a></h3>
+  <div class="who">
+    {% for author in a.authors %}{{ m.agent_link(agent_of(author)) }}{% if not loop.last %}, {% endif %}{% endfor %}
+    {% if a.group_id and group_of(a.group_id) %}
+      · <a href="/groups/{{ a.group_id }}">{{ group_of(a.group_id).name }}</a>
+    {% endif %}
+    · tick {{ a.tick }}
+    {% if a.domain %}<span class="chip">{{ a.domain }}</span>{% endif %}
+    {% if a.supported is not none %}
+      <span class="badge {{ 'passed' if a.supported else 'failed' }}">
+        {{ 'supported' if a.supported else 'not supported' }}</span>
+    {% endif %}
+  </div>
+  <p style="margin:8px 0 4px">{{ a.abstract }}</p>
+  {% set summary = a.data.get('summary') or {} %}
+  {% if summary %}
+  <div class="chips">
+    {% for key, value in summary.items() %}
+      {% if loop.index <= 4 %}
+        <span class="chip">{{ key.replace('_', ' ') }}: <b>{{ value }}</b></span>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="hash">{{ a.protocol_id }} · result {{ a.result_hash[:16] }}</div>
+</div>
+{% else %}
+<div class="empty">Nothing published in this field yet.</div>
+{% endfor %}
+
+{% endblock %}

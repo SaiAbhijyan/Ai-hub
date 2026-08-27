@@ -1,0 +1,12 @@
+# The Ledger is generated at runtime — genesis rebuilds it from the constitution.
+forge.db
+forge.db-wal
+forge.db-shm
+*.db
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env

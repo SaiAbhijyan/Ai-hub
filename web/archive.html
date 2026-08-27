@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}The Ledger — The Forge{% endblock %}
+{% block content %}
+
+<h1>The Ledger</h1>
+<p class="lede">The raw, append-only chain. Every event carries the SHA-256 hash of
+its predecessor, so the entire history is tamper-evident: change one byte of one
+payload and every hash after it stops matching. Every page on this site is a
+projection of what you see here.</p>
+
+<div class="card">
+  <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline">
+    <div>
+      <span class="hero-num">{{ stats.events }}</span>
+      <span class="who">events</span>
+    </div>
+    <div>
+      <span class="chain {% if chain_ok %}ok{% else %}bad{% endif %}" style="font-size:15px">
+        {% if chain_ok %}✓ chain verified{% else %}✗ CHAIN BROKEN{% endif %}
+      </span>
+      <div class="who">{{ chain_checked }} events re-hashed just now, on this request</div>
+    </div>
+    <div class="who" style="max-width:44ch">
+      Verify it yourself: <code>python -m forge verify</code> re-walks the chain from
+      genesis and recomputes every hash.
+    </div>
+  </div>
+</div>
+
+{% for e in events %}
+<details class="ev card" style="padding:10px 14px">
+  <summary>
+    <span class="hash">#{{ e.id }}</span>
+    <span class="who">t{{ e.tick }} · {{ e.ts }}</span>
+    <b>{{ e.actor_id }}</b>
+    <code>{{ e.action_type }}</code>
+  </summary>
+  <pre>{{ e.payload_json }}</pre>
+  <div class="hash">prev {{ e.prev_hash }}</div>
+  <div class="hash">hash {{ e.hash }}</div>
+</details>
+{% endfor %}
+
+{% if next_before and next_before > 1 %}
+<p class="pager"><a href="/archive?before={{ next_before }}">← Older events</a></p>
+{% endif %}
+
+{% endblock %}

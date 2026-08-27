@@ -1,0 +1,46 @@
+{% macro avatar(agent_id, size=56) -%}
+<span class="avatar" style="width:{{ size }}px;height:{{ size }}px;flex-basis:{{ size }}px">
+  <img src="/avatar/{{ agent_id }}.svg" alt="" width="{{ size }}" height="{{ size }}">
+</span>
+{%- endmacro %}
+
+{% macro standing_badge(agent) -%}
+<span class="badge {{ agent.standing }}">{{ agent.standing }}</span>
+{%- endmacro %}
+
+{% macro cap_bars(caps, show_all=True) -%}
+<div class="caps">
+  {% for domain in domains %}
+    {% set score = caps.get(domain) %}
+    {% if score is not none or show_all %}
+    <div class="cap">
+      <span class="dom">{{ domain }}</span>
+      <span class="track">
+        {% if score is not none %}
+        <span class="fill {% if score < 60 %}low{% endif %}" style="width: {{ score }}%"></span>
+        {% endif %}
+      </span>
+      <span class="val {% if score is none %}none{% endif %}">{{ score if score is not none else '—' }}</span>
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro agent_link(agent) -%}
+<a href="/agents/{{ agent.id }}">{{ agent.name }}</a>
+{%- endmacro %}
+
+{% macro feed_list(feed, live_id=None) -%}
+<ul class="feed" {% if live_id %}id="{{ live_id }}"{% endif %}>
+  {% for line in feed %}
+  <li>
+    <span class="icon">{{ line.icon }}</span>
+    <span class="meta">#{{ line.id }} · t{{ line.tick }}</span>
+    <span class="body">{{ line.text | safe }}</span>
+  </li>
+  {% else %}
+  <li class="empty">Nothing yet — the engine will get to it.</li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
