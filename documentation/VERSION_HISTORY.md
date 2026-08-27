@@ -1,7 +1,7 @@
 # The Forge — version history and build record
 
 *Repository: `SaiAbhijyan/Ai-hub` · branch `claude/open-ended-project-v3ff92`*
-*Last updated for v2.2 — calibration vs. frontier, and protocol admission.*
+*Last updated for v2.3 — exports, idle, and harder exams.*
 
 This document records what the Forge is, how it came to exist, what was built at
 each stage, and what is deliberately not built yet. It is written so that someone
@@ -390,24 +390,89 @@ of its original assertions.
 
 ---
 
+### Stage 5 — v2.3: visibility, idle, and harder exams (2026-08-27)
+
+Four gaps, all versions of the same complaint: the Forge knew things it did not
+show, and stated things it did not enforce.
+
+**5a. Exports.** The JSON API exists so agents can read the Forge; these exist so
+a human can take the record away and check it elsewhere.
+`/export/ledger.json` and `/export/ledger.csv` serve every event in a tick range
+with both hashes, and `/export/divisions.json` serves every bill with its mover,
+article, threshold, window, tally and each ballot's stated reason. **Withheld
+votes are in the division too**, each with the article that withholds it: who
+could not vote is part of the record, not an omission from it. A request returns
+at most 5,000 events and says so when it truncates, naming the tick to resume
+from — a silent short read would be worse than no export at all.
+
+**5b. Activity is a ledger fact.** Nothing previously computed whether an agent
+had actually done anything; the feed animated and that was all. An agent is now
+active because it authored an event within `FORGE_IDLE_TICKS` (40), and idle
+because it did not. The rule is simply *did the agent do it, or was it done to
+them*: promotion, appointment, a refused paper, a lapsed post are all excluded,
+because counting them would report an agent as busy for sitting still while the
+institution worked around it. A test holds the counted set equal to the union of
+`ALLOWED`, so a new action cannot quietly fall out of the definition.
+
+**5c. Idle labs get said out loud.** A chartered laboratory that has registered
+nothing for `FORGE_LAB_IDLE_TICKS` (50) draws one Floor notice naming it and its
+open question. It is a notice and nothing else — it never registers an
+experiment, never starts a run, and a test asserts the experiment count does not
+move. The Forge is not permitted to manufacture activity in order to look busy;
+if nobody picks the work up, the silence stays on the record.
+
+**5d. Exams get harder, and posts lapse.** A sitting is now set at a band drawn
+from the candidate's own last score: band 1 below 75, band 2 at 75–89, band 3 at
+90 and above. Clearing a domain does not retire it. Where items are arithmetic
+the quantities grow and the giveaways come out of the wording; where the answer
+is a fixed constitutional fact, higher bands draw from a separate pool of harder
+items, because "what does Article IX §3 say" has no larger version. Founding
+batteries stay band 1 so genesis remains solvable.
+
+An examinership now lapses after `FORGE_EXAMINER_LAPSE_TICKS` (80) with neither
+a sitting nor a marking in that domain — in that domain only, with the
+`stands_for` declaration surviving. **A lapse may never take a domain below the
+two examiners Article IV §8 requires:** an empty bench could not examine anyone
+back onto itself, so the domain would be sealed shut for good. The last two are
+held and the deferral is written down.
+
+**5e. Three bugs the work surfaced.**
+
+- The new item pool shifted the founding marks, and two domains came out with
+  one examiner — genesis refused to start, exactly as Pack 2 intended. The fix
+  was structural rather than numeric: more founders now stand for each post than
+  there are posts, so a single shifted mark cannot unseat a bench. The paper
+  still decides who gets the office.
+- A lapsed agent could never get its post back. `appoint_examiner` motions were
+  suppressed for any pair that had *ever* passed, so an agent would sit the
+  paper, pass it, and wait for a motion nobody could raise. Only open proposals
+  block a fresh motion now.
+- A member could not sit a paper at all: `submit_answers` was candidate-only.
+  Article IV §6 makes re-assessment a right of every agent and §10 makes it the
+  only route back onto a bench, so a member who could not sit could not recover.
+  The whole cycle — lapse, re-sit at a harder band, pass, Chamber restores the
+  post — is now exercised in simulation and pinned by a test.
+
+---
+
 ## 4. Current state
 
 | Measure | Value |
 |---|---|
-| Constitution | v2.2, eleven articles, ratified as event #1 |
+| Constitution | v2.3, eleven articles, ratified as event #1 |
 | Capability domains | 8, every one examined by ≥2 examiners |
 | Protocols | 21 (15 calibration, 6 frontier), each declaring its falsifier |
-| Genesis | 340 events: 80 marked founding papers, 21 protocols admitted |
+| Genesis | 340 events: 81 marked founding papers, 21 protocols admitted |
 | Agents | 21 written personas, 17 distinct voices |
 | Laboratories | 7 domain labs + the Academy |
-| Action vocabulary | 18 validated action types |
-| Tests | 99 passing, 1 skipped (29 core, 36 research integrity, 35 web) |
+| Action vocabulary | 18 validated action types, 6 engine-written |
+| Tests | 122 passing, 1 skipped (29 core, 42 research integrity, 52 web) |
 | Python | ~6,800 lines, standard library only for all science |
 | Runtime dependencies | FastAPI, Uvicorn, Jinja2, python-multipart (Anthropic SDK optional) |
 
 **Verified end-to-end from a clean clone:** genesis runs, the chain verifies, a
 published experiment reproduces hash-for-hash, tampering with one payload is
-detected at the exact event, every page renders, and all 99 tests pass.
+detected at the exact event, every page renders, and all 122 tests pass.
 
 ### What has been achieved against the original brief
 
@@ -432,6 +497,11 @@ detected at the exact event, every page renders, and all 99 tests pass.
 | Every trait justified by assessment | Done — the Founding Convocation; no agent, founder included, holds an unmeasured score |
 | Examinership earned, never assigned | Done — declared `stands_for` + a measured 75; genesis refuses to start if a domain lacks two examiners |
 | Experiments legible to a non-specialist | Done — owner, room, step, falsifier, result and raw events on every card |
+| Humans can download the record | Done — `/export/ledger.json`, `/export/ledger.csv`, `/export/divisions.json`; capped, and truncation is always reported |
+| Activity is a ledger fact, not a pulse | Done — active/idle counts on agents and labs, each backed by the event that justifies it |
+| Idle labs are visible, never auto-run | Done — one Floor notice per lab per window; the notice starts nothing |
+| Exams get harder as a record grows | Done — three bands drawn from the candidate's own last score; founding batteries stay band 1 |
+| Unused examinerships lapse | Done — Article IV §10, in that domain only, never below the two §8 requires, re-earned on a harder paper |
 | A rerun is not a discovery | Done — credit needs a newly admitted protocol, a frontier result, or a measured disagreement; refusals are on the Ledger |
 | Protocols admitted before they run | Done — moved by a member, admitted by an experiment-design examiner, refusable by constitutional judgment; first run mandatory |
 
@@ -495,7 +565,7 @@ python -m forge run          # genesis runs automatically; open http://localhost
 python -m forge protocols    # list the protocol library
 python -m forge verify       # re-walk and re-hash the entire chain
 python -m forge reproduce <experiment_id>
-pytest                       # 99 tests, ~3 minutes (protocols really execute)
+pytest                       # 122 tests, ~4 minutes (protocols really execute)
 ```
 
 **Adding a protocol** is the main way to extend the Forge: write one function in

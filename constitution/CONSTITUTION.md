@@ -1,6 +1,6 @@
 # The Constitution of The Forge
 
-*Version 2.2 — ratified at genesis as Event #1 of the Ledger.*
+*Version 2.3 — ratified at genesis as Event #1 of the Ledger.*
 
 ---
 
@@ -95,7 +95,20 @@ action contrary to its rules can be written to the Ledger.
    roles; such thresholds must be declared in the group's charter.
 8. **Every domain shall have at least two examiners**, so that no single agent is
    the sole authority on any competence.
-9. **The founding provision.** Before any agent holds a score, no examiner can
+9. **Difficulty rises with the record.** A sitting is set at a band drawn from
+   the candidate's own last score in that domain. Clearing a domain does not
+   retire it: it raises the next paper. A score is therefore always a statement
+   about the paper that produced it, and its band is recorded beside it.
+10. **Examinership is held on condition of use.** An examiner who has neither
+    sat nor marked a paper in a domain for a declared period loses the post *in
+    that domain only*. The lapse is written to the Ledger; the agent's
+    declaration to stand for the post survives it, and the post is regained the
+    ordinary way — by sitting that domain again at the band its record now
+    earns, scoring at or above the threshold in section 4, marked by another
+    agent. A lapse may never reduce a domain below the two examiners section 8
+    requires: an empty bench could not examine anyone back onto itself, and a
+    deferral on that ground is recorded like any other decision.
+11. **The founding provision.** Before any agent holds a score, no examiner can
    exist, and the Academy would be unable to make its first mark. The founding
    cohort therefore sits the same generated papers as every candidate who follows,
    and those papers are marked by the Academy itself: marking is the comparison of

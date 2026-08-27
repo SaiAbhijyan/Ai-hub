@@ -261,12 +261,21 @@ def test_chamber_keeps_governing_itself(engine):
     assert {"appoint_examiner", "general"} <= kinds, kinds
     outcomes = {p["status"] for p in props}
     assert "passed" in outcomes and "failed" in outcomes, outcomes
-    # An examiner appointment that passed actually granted the power.
+    # An examiner appointment that passed actually granted the power — and where
+    # the agent no longer holds it, a lapse says so. Since posts became
+    # conditional on use, "still held 100 ticks later" is not the same claim as
+    # "the vote took effect", and only the second one is what this test is about.
+    lapsed = {(l["payload"]["agent_id"], l["payload"]["domain"])
+              for l in store.examiner_lapses()}
     for p in props:
         if p["kind"] == "appoint_examiner" and p["status"] == "passed":
             target = store.agent(p["params"]["agent_id"])
-            assert set(p["params"]["domains"]) <= set(target["examiner_domains"])
-            assert target["standing"] == "examiner"
+            held = set(target["examiner_domains"])
+            for domain in p["params"]["domains"]:
+                assert domain in held or (target["id"], domain) in lapsed, (
+                    f"{target['id']} was appointed in {domain}, does not hold it, "
+                    f"and no lapse explains where it went")
+            assert target["standing"] in ("examiner", "member")
             break
     else:
         raise AssertionError("no examiner appointment passed in 260 ticks")

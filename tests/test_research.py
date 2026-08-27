@@ -377,7 +377,7 @@ def test_no_agent_grades_its_own_paper(tmp_path):
 
 
 def test_founding_results_are_public_to_humans_and_to_agents(tmp_path):
-    """Article IV §9: the scorecard is on the Ledger, and the pages that agents
+    """Article IV §11: the scorecard is on the Ledger, and the pages that agents
     and humans both read serve it — including the papers that went badly."""
     from fastapi.testclient import TestClient
 
@@ -687,3 +687,80 @@ def test_a_failure_or_a_disagreement_reopens_the_bench(tmp_path):
         "experiment_id": exp["id"], "status": "failed",
         "findings": "The run did not complete: timeout."})
     assert validate(store, "cassin", "create_experiment", payload) is None
+
+
+# ------------------------------------------------- difficulty bands (Pack 3)
+
+def test_band_is_drawn_from_the_candidates_own_record():
+    assert exams.band_for(None) == 1        # never sat
+    assert exams.band_for(0) == 1
+    assert exams.band_for(74) == 1
+    assert exams.band_for(75) == 2          # the examiner threshold
+    assert exams.band_for(89) == 2
+    assert exams.band_for(90) == 3
+    assert exams.band_for(100) == 3
+
+
+def test_a_higher_band_is_a_different_and_harder_paper():
+    """Band 2 and 3 must not be band 1 with a new label. Item ids are compared
+    for collision, prompts for sameness, and methods for genuine novelty."""
+    for domain in exams.GENERATORS:
+        first = exams.generate(domain, "asmt-band", band=1)
+        assert len(first) == 6, domain
+        base_ids = {i["id"] for i in first}
+        base_methods = {i["method"] for i in first}
+        base_prompts = {i["prompt"] for i in first}
+
+        for band in (2, 3):
+            paper = exams.generate(domain, "asmt-band", band=band)
+            assert len(paper) == 6, (domain, band)
+            ids = {i["id"] for i in paper}
+            assert not (ids & base_ids), (domain, band, ids & base_ids)
+            # Not merely re-labelled: most of the paper is different text.
+            shared = base_prompts & {i["prompt"] for i in paper}
+            assert len(shared) <= 2, (domain, band, shared)
+            # And it reaches for techniques band 1 never asks about.
+            assert {i["method"] for i in paper} - base_methods, (domain, band)
+
+
+def test_every_band_still_marks_against_computed_truth():
+    for domain in exams.GENERATORS:
+        for band in exams.BANDS:
+            items = exams.generate(domain, "asmt-mark", band=band)
+            score, marks = exams.mark(items, [str(i["answer"]) for i in items])
+            assert score == 100, (domain, band, marks)
+            score, _ = exams.mark(items, ["not the answer"] * len(items))
+            assert score == 0, (domain, band)
+
+
+def test_a_resit_excludes_seen_items_at_every_band():
+    for band in exams.BANDS:
+        first = exams.generate("reasoning", "asmt-a", band=band)
+        second = exams.generate("reasoning", "asmt-b", band=band,
+                                exclude_ids={i["id"] for i in first})
+        assert second
+        assert not ({i["id"] for i in first} & {i["id"] for i in second})
+
+
+def test_the_founding_batteries_are_band_one(tmp_path):
+    """Genesis must stay solvable: the founding cohort sits the entry paper, and
+    the bands only bite once there is a record to draw them from."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    bands = {a["band"] for a in store.assessments()}
+    assert bands == {1}, bands
+
+
+def test_genesis_still_seats_two_examiners_in_every_domain(tmp_path):
+    """Article IV §8, re-checked after the bands changed the item pool. This is
+    the test that catches a paper change quietly unseating a bench."""
+    from forge.store import DOMAINS
+
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    by_domain = {d: [] for d in DOMAINS}
+    for agent in store.agents():
+        for domain in agent["examiner_domains"]:
+            by_domain[domain].append(agent["name"])
+    thin = {d: who for d, who in by_domain.items() if len(who) < 2}
+    assert not thin, thin

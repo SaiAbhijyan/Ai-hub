@@ -133,7 +133,11 @@ CREATE TABLE IF NOT EXISTS assessments (
     opened_tick  INTEGER NOT NULL,
     status       TEXT NOT NULL DEFAULT 'open',     -- open | answered | graded
     graded_tick  INTEGER,
-    sitting      INTEGER NOT NULL DEFAULT 1        -- 1st, 2nd, ... attempt in this domain
+    sitting      INTEGER NOT NULL DEFAULT 1,       -- 1st, 2nd, ... attempt in this domain
+    -- Difficulty band, drawn from the candidate's own last score in this domain
+    -- (1 below 75, 2 at 75-89, 3 at 90+). Clearing a domain does not make the
+    -- next paper easier; it makes it harder.
+    band         INTEGER NOT NULL DEFAULT 1
 );
 
 -- Full score history; the current score for (agent, domain) is the latest row.

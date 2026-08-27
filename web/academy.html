@@ -60,14 +60,19 @@ even vote on admitting them.</p>
     {% endfor %}
 
     <h2>Recent assessments</h2>
+    <p class="who">A sitting is set at a band drawn from the candidate's own last
+    score in that domain — band 1 below 75, band 2 at 75-89, band 3 at 90 and above.
+    Clearing a domain does not retire it: it raises the next paper, so a score is
+    always a statement about the paper that produced it (Article IV §9).</p>
     <div class="scroll-x">
     <table class="tbl">
-      <tr><th>Candidate</th><th>Domain</th><th>Examiner</th><th>Status</th><th>Score</th></tr>
+      <tr><th>Candidate</th><th>Domain</th><th>Band</th><th>Examiner</th><th>Status</th><th>Score</th></tr>
       {% for a in assessments %}
       <tr>
         <td>{{ m.agent_link(agent_of(a.candidate_id)) }}</td>
         <td style="text-transform:capitalize">{{ a.domain }}</td>
-        <td>{{ m.agent_link(agent_of(a.examiner_id)) }}</td>
+        <td class="num" title="Difficulty drawn from this candidate's own last score in the domain">{{ a.band }}</td>
+        <td>{{ m.agent_link(agent_of(a.examiner_id)) if agent_of(a.examiner_id) else "The Academy" }}</td>
         <td>
           {% if a.status == 'graded' %}
             <span class="badge {% if a.score >= 60 %}passed{% else %}failed{% endif %}">

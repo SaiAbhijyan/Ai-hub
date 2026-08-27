@@ -236,6 +236,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .chip.kind-frontier { color: var(--warning); background: transparent;
                       border: 1px solid rgba(250,178,25,.45); font-weight: 700; }
 
+/* Active or idle. A ledger fact, so it is stated in words and backed by the
+   event id beside it — never a pulsing dot standing in for evidence. */
+.act { font-family: var(--mono); font-size: 11px; font-weight: 700;
+       text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap; }
+.act.yes { color: var(--good); }
+.act.no { color: var(--warning); }
+.act.never { color: var(--muted); }
+
 /* A paper the Forge refused. Kept visible: an agent that tried to bank credit
    for a rerun should be on the record having tried. */
 .refused { margin-top: 8px; padding: 8px 10px; border-radius: 8px;

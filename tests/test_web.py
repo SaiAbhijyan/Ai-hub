@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 
 import pytest
@@ -333,7 +335,7 @@ def test_public_json_serves_scorecards_and_examiner_names(client, store):
     # The founding papers name their marker honestly rather than leaving it blank.
     founding = [s for s in graded if s["examiner_id"] == "forge"]
     assert founding, "the founding examination should be in the public record"
-    assert all("Article IV §9" in s["examiner"] for s in founding)
+    assert all("Article IV §11" in s["examiner"] for s in founding)
     assert any(s["score"] < 75 for s in graded), \
         "a scorecard with no low marks is not a measurement"
 
@@ -455,3 +457,403 @@ def test_a_refused_paper_is_recorded_and_shown(tmp_path):
         html = client.get("/experiments").text
     assert "No paper." in html
     assert "calibration protocol" in html
+
+
+# ------------------------------------------------------ exports for humans
+
+def test_ledger_json_export_matches_the_store(client, store):
+    body = client.get("/export/ledger.json").json()
+    assert body["count"] == store.event_count()
+    assert body["truncated"] is False
+    assert body["chain"]["ok"] is True
+    ids = [e["id"] for e in body["events"]]
+    assert ids == sorted(ids), "an export must be in chain order"
+    known = store.events(limit=1)[0]
+    row = next(e for e in body["events"] if e["id"] == known["id"])
+    assert row["type"] == known["action_type"]
+    assert row["actor"] == known["actor_id"]
+    assert row["payload"] == known["payload"]
+    assert row["hash"] == known["hash"] and row["prev_hash"] == known["prev_hash"]
+
+
+def test_ledger_export_downloads_and_can_be_narrowed(client, store):
+    r = client.get("/export/ledger.json")
+    assert "attachment" in r.headers["content-disposition"]
+    genesis = client.get("/export/ledger.json?from_tick=0&to_tick=0").json()
+    assert genesis["count"] > 0
+    assert {e["tick"] for e in genesis["events"]} == {0}
+    assert genesis["count"] < store.event_count()
+
+
+def test_ledger_csv_has_a_header_and_a_row_per_event(client, store):
+    r = client.get("/export/ledger.csv")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+    rows = list(csv.reader(io.StringIO(r.text)))
+    assert rows[0] == ["id", "tick", "ts", "type", "actor", "summary",
+                       "prev_hash", "hash"]
+    assert len(rows) == store.event_count() + 1
+    first = rows[1]
+    assert first[0] == "1" and first[3] == "ratify_constitution"
+    assert first[5].strip(), "the summary column must actually say something"
+    assert "<a href" not in r.text, "CSV must not carry markup"
+
+
+def test_a_capped_export_says_so_rather_than_going_quiet(client, store, monkeypatch):
+    """A silent short read would be worse than no export at all."""
+    import forge.server as server_mod
+
+    monkeypatch.setattr(server_mod, "EXPORT_MAX_EVENTS", 5)
+    body = client.get("/export/ledger.json").json()
+    assert body["count"] == 5
+    assert body["truncated"] is True
+    assert body["next_from_tick"] is not None
+    csv_text = client.get("/export/ledger.csv").text
+    assert "truncated at 5 events" in csv_text
+
+
+def test_divisions_export_carries_reasons_and_withheld_votes(client, store):
+    body = client.get("/export/divisions.json").json()
+    assert body["count"] == len(store.proposals())
+    by_id = {d["id"]: d for d in body["divisions"]}
+    for prop in store.proposals():
+        d = by_id[prop["id"]]
+        assert d["title"] == prop["title"]
+        assert d["mover"]["id"] == prop["author_id"]
+        assert d["article"] == "Article VI §5"
+        assert d["threshold"]
+        assert d["window"] == {"opened_tick": prop["opened_tick"],
+                               "closes_tick": prop["closes_tick"]}
+        ballots = store.votes_for(prop["id"])
+        assert len(d["votes"]) == len(ballots)
+        for cast, exported in zip(ballots, d["votes"]):
+            assert exported["choice"] == cast["choice"]
+            assert exported["reason"] == cast["reason"]
+            assert exported["event_id"], "every ballot cites the event that recorded it"
+
+    # Who could not vote is part of the division, with the article that says so.
+    withheld = body["divisions"][0]["withheld"]
+    assert withheld, "the aide at least holds no vote"
+    for row in withheld:
+        assert "Article" in row["article"], row
+
+
+def test_one_division_can_be_exported_alone(client, store):
+    prop = store.proposals()[0]
+    body = client.get(f"/export/divisions.json?bill_id={prop['id']}").json()
+    assert body["count"] == 1
+    assert body["divisions"][0]["id"] == prop["id"]
+
+
+# ------------------------------------------------- last-active and idle counts
+
+def test_activity_set_is_exactly_what_an_agent_may_author():
+    """Activity means the agent did something. The definition must not drift
+    when a new action is added to the vocabulary."""
+    from forge.actions import ALLOWED
+    from forge.store import ACTIVITY_ACTIONS
+
+    authored = set().union(*ALLOWED.values())
+    assert set(ACTIVITY_ACTIONS) == authored, (
+        authored ^ set(ACTIVITY_ACTIONS))
+
+
+def test_a_speech_makes_an_agent_active_and_silence_makes_it_idle(tmp_path):
+    from forge.engine import IDLE_TICKS
+    from forge.seed import seed as seed_store
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+    store.set_tick(100)
+    event = store.append("cassin", "post_message",
+                         {"group_id": None, "text": "Still here."})
+
+    now = store.activity("cassin")
+    assert now["active"] is True and now["state"] == "active"
+    assert now["last"]["id"] == event["id"]
+    assert now["last"]["action_type"] == "post_message"
+    assert now["age"] == 0
+
+    # Advance past the window without cassin authoring anything.
+    store.set_tick(100 + IDLE_TICKS + 1)
+    later = store.activity("cassin")
+    assert later["active"] is False and later["state"] == "idle"
+    assert later["last"]["id"] == event["id"], "the last event does not move"
+    assert later["age"] == IDLE_TICKS + 1
+
+
+def test_an_agent_that_never_acted_says_so(tmp_path):
+    from forge.seed import seed as seed_store
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+    # Founding events are written by the Forge, not by the agent, so a founder
+    # who has not yet taken a turn has genuinely never acted.
+    quiet = next((a["id"] for a in store.agents()
+                  if store.last_activity(a["id"]) is None), None)
+    if quiet is None:
+        pytest.skip("every agent acted during genesis")
+    assert store.activity(quiet)["state"] == "never acted"
+
+
+def test_agent_and_group_pages_show_the_counts(client, store):
+    html = client.get("/agents").text
+    total = len(store.agents())
+    active = sum(1 for a in store.agents() if store.activity(a["id"])["active"])
+    assert f"<b>{total}</b><span>agents</span>" in html
+    assert f"<b>{active}</b><span>active</span>" in html
+    assert "last acted" in html
+
+    groups = client.get("/groups").text
+    assert "active" in groups and "idle" in groups
+    one = next(g for g in store.groups() if store.group_members(g["id"]))
+    page = client.get(f"/groups/{one['id']}").text
+    counts = store.group_activity(one["id"])
+    assert f"<b>{counts['total']}</b><span>agents</span>" in page
+
+
+# ------------------------------------------------ idle labs and lapsed posts
+
+def test_an_idle_lab_gets_exactly_one_notice_and_no_experiments(tmp_path, monkeypatch):
+    """The nudge is a notice and nothing else. If it ever registered work to
+    make the lab look busy, that would be the Forge manufacturing its own
+    activity — the whole point is that it says so instead."""
+    import forge.engine as engine_mod
+    from forge.seed import seed as seed_store
+
+    monkeypatch.setattr(engine_mod, "LAB_IDLE_TICKS", 10)
+    monkeypatch.setattr(engine_mod, "EXAMINER_LAPSE_TICKS", 10_000)
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    class Silent:
+        """Nobody does anything, so every lab goes quiet."""
+        def act(self, agent, ctx):
+            return []
+
+    engine = Engine(store, Silent())
+    before = len(store.experiments())
+    for _ in range(12):
+        engine.tick()
+
+    quiet = next(g for g in store.groups() if g["domains"])
+    notices = store.idle_notices(quiet["id"])
+    assert len(notices) == 1, [n["payload"] for n in notices]
+    payload = notices[0]["payload"]
+    assert payload["group_name"] == quiet["name"]
+    assert payload["frontier_protocol"] or payload["frontier_question"] == ""
+
+    # The nudge did not start anything.
+    assert len(store.experiments()) == before
+    assert store.verify_chain()["ok"]
+
+    # One per window, not one per tick: still quiet five ticks later, still one
+    # notice. (A second window later would legitimately produce a second.)
+    for _ in range(5):
+        engine.tick()
+    assert len(store.idle_notices(quiet["id"])) == 1
+    assert len(store.experiments()) == before
+
+
+def test_the_idle_notice_names_the_frontier_and_reaches_the_floor(tmp_path, monkeypatch):
+    import forge.engine as engine_mod
+    from forge.seed import seed as seed_store
+
+    monkeypatch.setattr(engine_mod, "LAB_IDLE_TICKS", 5)
+    monkeypatch.setattr(engine_mod, "EXAMINER_LAPSE_TICKS", 10_000)
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    class Silent:
+        def act(self, agent, ctx):
+            return []
+
+    engine = Engine(store, Silent())
+    for _ in range(7):
+        engine.tick()
+    notices = store.idle_notices()
+    assert notices
+    with TestClient(create_app(store, engine=None)) as client:
+        floor = client.get("/").text
+    named = [n for n in notices if n["payload"]["frontier_protocol"]]
+    assert named, "a chartered lab should have an open question to name"
+    assert "has registered no experiment" in floor
+
+
+def test_an_unused_examinership_lapses(tmp_path, monkeypatch):
+    import forge.engine as engine_mod
+    from forge.seed import seed as seed_store
+
+    monkeypatch.setattr(engine_mod, "EXAMINER_LAPSE_TICKS", 5)
+    monkeypatch.setattr(engine_mod, "LAB_IDLE_TICKS", 10_000)
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    class Silent:
+        def act(self, agent, ctx):
+            return []
+
+    before = {a["id"]: list(a["examiner_domains"]) for a in store.agents()}
+    engine = Engine(store, Silent())
+    for _ in range(8):
+        engine.tick()
+
+    lapses = store.examiner_lapses()
+    assert lapses, "nobody sat or graded anything; some post should have lapsed"
+    for lapse in lapses:
+        p = lapse["payload"]
+        assert "Article IV" in p["reason"]
+        assert p["domain"] in before[p["agent_id"]]
+        # The post goes in that domain only.
+        now = store.agent(p["agent_id"])
+        assert p["domain"] not in now["examiner_domains"]
+    assert store.verify_chain()["ok"]
+
+
+def test_lapse_never_empties_a_bench(tmp_path, monkeypatch):
+    """Article IV §8 outranks lapse: a domain at zero examiners could not
+    examine anyone back onto itself, so it would be sealed shut for good."""
+    from forge.store import DOMAINS
+    import forge.engine as engine_mod
+    from forge.seed import seed as seed_store
+
+    monkeypatch.setattr(engine_mod, "EXAMINER_LAPSE_TICKS", 3)
+    monkeypatch.setattr(engine_mod, "LAB_IDLE_TICKS", 10_000)
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    class Silent:
+        def act(self, agent, ctx):
+            return []
+
+    engine = Engine(store, Silent())
+    for _ in range(40):
+        engine.tick()
+
+    by_domain = {d: 0 for d in DOMAINS}
+    for agent in store.agents():
+        for domain in agent["examiner_domains"]:
+            by_domain[domain] += 1
+    thin = {d: n for d, n in by_domain.items() if n < 2}
+    assert not thin, thin
+
+    # And the holding is stated, not silent.
+    deferrals = store._payload_events("lapse_deferred", None, lambda p: True)
+    assert deferrals, "a held post must say why it was held"
+    assert "Article IV §8" in deferrals[0]["payload"]["reason"]
+
+
+def test_a_lapsed_agent_keeps_what_it_stands_for(tmp_path, monkeypatch):
+    """The declaration survives the office: an agent may stand again."""
+    import forge.engine as engine_mod
+    from forge.seed import FOUNDERS
+    from forge.seed import seed as seed_store
+
+    monkeypatch.setattr(engine_mod, "EXAMINER_LAPSE_TICKS", 5)
+    monkeypatch.setattr(engine_mod, "LAB_IDLE_TICKS", 10_000)
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    class Silent:
+        def act(self, agent, ctx):
+            return []
+
+    engine = Engine(store, Silent())
+    for _ in range(8):
+        engine.tick()
+    lapses = store.examiner_lapses()
+    assert lapses
+    stood = {f["id"]: f.get("stands_for", []) for f in FOUNDERS}
+    for lapse in lapses:
+        p = lapse["payload"]
+        if p["agent_id"] in stood:
+            assert p["domain"] in stood[p["agent_id"]], (
+                "an agent only ever held a post it stood for")
+
+
+def test_lapse_does_not_fire_during_genesis(tmp_path):
+    from forge.seed import seed as seed_store
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+    assert not store.examiner_lapses()
+    assert not store.idle_notices()
+
+
+def test_a_lapsed_post_is_re_earned_on_a_harder_paper(tmp_path):
+    """Article IV §10's promise, end to end: the post comes back by sitting the
+    domain again — and because the agent already has a record, the paper it sits
+    is a harder one than the paper that won it the post originally."""
+    from forge import exams
+    from forge.actions import validate
+    from forge.seed import seed as seed_store
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+
+    # Pick an examiner in a domain that has a spare holder, so the §8 floor does
+    # not defer the lapse we are testing.
+    counts = {}
+    for agent in store.agents():
+        for domain in agent["examiner_domains"]:
+            counts[domain] = counts.get(domain, 0) + 1
+    domain = next(d for d, n in counts.items() if n >= 3)
+    holder = next(a for a in store.agents() if domain in a["examiner_domains"])
+    earned = store.capabilities_current(holder["id"])[domain]
+    assert earned >= 75
+    assert store.assessments(candidate_id=holder["id"])[0]["band"] == 1
+
+    store.set_tick(200)
+    store.append("forge", "examiner_lapsed", {
+        "agent_id": holder["id"], "domain": domain, "window": 80,
+        "last_touch_tick": 0, "last_touch_event": None,
+        "reason": "Article IV: unused."})
+    assert domain not in store.agent(holder["id"])["examiner_domains"]
+
+    # An examiner in that domain is offered the re-sit, at the band the lapsed
+    # agent's own record earns — which is above band 1.
+    setter = next(a for a in store.agents()
+                  if domain in a["examiner_domains"] and a["id"] != holder["id"])
+    engine = Engine(store, SimulatedAgent())
+    ctx = engine.build_context(setter, 201)
+    offer = next(r for r in ctx["resits_available"]
+                 if r["agent"]["id"] == holder["id"] and r["domain"] == domain)
+    band = exams.band_for(offer["last_score"])
+    assert band >= 2, (offer["last_score"], band)
+
+    # The paper is legal to set, and a member may sit it: without that, the
+    # constitutional route back onto the bench would be closed.
+    aid = "asmt-resit"
+    items = exams.generate(domain, aid, band=band,
+                           exclude_ids=set(offer["seen_item_ids"]))
+    payload = {"id": aid, "candidate_id": holder["id"], "domain": domain,
+               "items": items, "tasks": [i["prompt"] for i in items],
+               "sitting": 2, "band": band}
+    assert validate(store, setter["id"], "open_assessment", payload) is None
+    store.append(setter["id"], "open_assessment", payload)
+    assert store.assessment(aid)["band"] == band
+
+    answers = [str(i["answer"]) for i in items]
+    assert validate(store, holder["id"], "submit_answers",
+                    {"assessment_id": aid, "answers": answers}) is None
+    store.append(holder["id"], "submit_answers",
+                 {"assessment_id": aid, "answers": answers})
+    score, marks = exams.mark(items, answers)
+    assert score == 100
+    grade = {"assessment_id": aid, "score": score, "marks": marks,
+             "notes": "Re-earned at the band the record now sets."}
+
+    # The examiner who set it may mark it; the agent may not mark its own.
+    assert validate(store, holder["id"], "grade_assessment", grade) is not None
+    assert validate(store, setter["id"], "grade_assessment", grade) is None
+    store.append(setter["id"], "grade_assessment", grade)
+
+    # The pass is on the record against the harder paper, and the Chamber can
+    # now be moved to restore the post.
+    assert store.capabilities_current(holder["id"])[domain] == 100
+    engine2 = Engine(store, SimulatedAgent())
+    ctx2 = engine2.build_context(setter, 202)
+    assert any(c["agent"]["id"] == holder["id"] and c["domain"] == domain
+               for c in ctx2["examiner_candidates"]), (
+        "a re-earned domain must be movable again, or the route back is closed")
+    assert store.verify_chain()["ok"]

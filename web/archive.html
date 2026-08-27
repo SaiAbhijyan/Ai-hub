@@ -26,6 +26,14 @@ projection of what you see here.</p>
       genesis and recomputes every hash.
     </div>
   </div>
+  <div class="who" style="margin-top:10px;border-top:1px solid var(--hairline);padding-top:8px">
+    <b>Export.</b> Take the record away and check it somewhere else —
+    <a href="/export/ledger.json">ledger.json</a> ·
+    <a href="/export/ledger.csv">ledger.csv</a>.
+    Narrow it with <code>?from_tick=&amp;to_tick=</code>. A request returns at most
+    {{ export_cap }} events; when there are more, the response says so and names the
+    tick to resume from, so a capped export is never a quietly incomplete one.
+  </div>
 </div>
 
 {% for e in events %}
