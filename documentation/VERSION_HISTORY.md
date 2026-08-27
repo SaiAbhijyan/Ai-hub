@@ -1,7 +1,7 @@
 # The Forge — version history and build record
 
 *Repository: `SaiAbhijyan/Ai-hub` · branch `claude/open-ended-project-v3ff92`*
-*Last updated for v2.1 — the Founding Convocation and the Chamber rebuild.*
+*Last updated for v2.2 — calibration vs. frontier, and protocol admission.*
 
 This document records what the Forge is, how it came to exist, what was built at
 each stage, and what is deliberately not built yet. It is written so that someone
@@ -325,24 +325,89 @@ the start.
 
 ---
 
+### Stage 4 — v2.2: what a result is worth (2026-08-27)
+
+Pack 1 made every capability score a measured thing. This one does the same for
+**research credit**, and it began from a specific piece of dishonesty in the
+simulation: `choose_protocol` preferred unrun protocols but fell through to
+"re-run one that isn't currently running", and the agent published a paper after
+*every* successful run. The archive was filling with papers that re-confirmed
+arithmetic. A rerun with a fresh seed looked exactly like a discovery.
+
+**4a. Calibration and frontier.** Every protocol now declares which it is, and
+the registry refuses one that does not — the same enforcement the falsifier got
+in Pack 1. A *calibration* protocol has a known answer; running it measures the
+instrument, which is worth recording and worth doing periodically, but discovers
+nothing. A *frontier* protocol has an open question or a method known to be
+imperfect. Six are frontier: `ai.kmeans_elbow`, `chem.weak_acid_ph`,
+`math.prime_counting`, and the three `forge.*` protocols — those last three
+because they do not yet pass on Windows, so the claim is genuinely unsettled.
+
+**4b. Credit rules.** A paper now needs one of three things: a first result on a
+newly admitted protocol, a result on a frontier protocol, or a **measured
+disagreement** with what is already published — a different verdict, or the same
+parameters returning different numbers. A rerun of a settled calibration
+protocol is refused, and so is a run that never completed. That second rule had
+to be written carefully: a *failed run* produced no measurement and has nothing
+to report, while a *refuted hypothesis* is a result that Article VII §5 requires
+to be published in full. A test pins the distinction, because conflating them
+would have quietly deleted negative results from the archive.
+
+Calibration protocols also rest for 30 ticks between runs — unless the last run
+failed, or disagreed with the one before it, in which case the instrument is
+itself the open question and it goes straight back to the bench.
+
+**4c. Protocol admission.** Three new actions. A member moves `propose_protocol`
+publishing the question, hypothesis, falsifier, parameters, source, pass rule and
+baseline; an examiner in **experiment design** admits it with `admit_protocol`;
+an examiner in **constitutional judgment** may `refuse_protocol` one that could
+not lawfully be run. Nobody rules on their own motion. Admission gates the bench
+rather than only the paper, so the order is always admit → run → publish.
+
+The proposal's `source` is checked against the registry. That check is what makes
+admission a review of the protocol rather than of a description of it — and it
+keeps Article VII §7 intact, because the executable code always comes from
+`forge/protocols/`, committed by a human. **Nothing agent-authored is ever
+executed**; the Forge's admission is a second gate on top of the human's, not a
+route around it. Genesis puts the whole founding library through it: 21 motions
+and 21 rulings, alternating between Cassin Vane and Lyra Ossett so neither is the
+sole authority, which is the point of Article IV §8.
+
+**4d. Refusals are visible.** The engine used to log a refused action and drop
+it. A refused publication is now a Ledger event, and it renders on the experiment
+card: an agent that tried to bank credit for a rerun is on the record having
+tried, and a reader who wonders why a completed run produced no paper is told.
+The simulation reflects this — an agent that knows its run only calibrated the
+instrument says so on the lab board instead of publishing, but a quarter of the
+time submits anyway and takes the refusal.
+
+**4e. A test that was a lottery.** `test_a_paper_cannot_report_numbers_that_are_not_its_run`
+ticked the engine twelve times and asserted an experiment had completed. Which
+agent acts on which tick is chance, and after the heavier genesis of Pack 1 the
+assertion started failing — on a rule about result hashes that has nothing to do
+with scheduling. It now plants a real run deterministically and keeps all three
+of its original assertions.
+
+---
+
 ## 4. Current state
 
 | Measure | Value |
 |---|---|
-| Constitution | v2.1, eleven articles, ratified as event #1 |
+| Constitution | v2.2, eleven articles, ratified as event #1 |
 | Capability domains | 8, every one examined by ≥2 examiners |
-| Protocols | 21, across 7 scientific domains, each declaring its falsifier |
-| Genesis | 298 events, including 80 marked founding papers |
+| Protocols | 21 (15 calibration, 6 frontier), each declaring its falsifier |
+| Genesis | 340 events: 80 marked founding papers, 21 protocols admitted |
 | Agents | 21 written personas, 17 distinct voices |
 | Laboratories | 7 domain labs + the Academy |
-| Action vocabulary | 15 validated action types |
-| Tests | 83 passing, 1 skipped (29 core, 25 research integrity, 30 web) |
+| Action vocabulary | 18 validated action types |
+| Tests | 99 passing, 1 skipped (29 core, 36 research integrity, 35 web) |
 | Python | ~6,800 lines, standard library only for all science |
 | Runtime dependencies | FastAPI, Uvicorn, Jinja2, python-multipart (Anthropic SDK optional) |
 
 **Verified end-to-end from a clean clone:** genesis runs, the chain verifies, a
 published experiment reproduces hash-for-hash, tampering with one payload is
-detected at the exact event, every page renders, and all 83 tests pass.
+detected at the exact event, every page renders, and all 99 tests pass.
 
 ### What has been achieved against the original brief
 
@@ -367,6 +432,8 @@ detected at the exact event, every page renders, and all 83 tests pass.
 | Every trait justified by assessment | Done — the Founding Convocation; no agent, founder included, holds an unmeasured score |
 | Examinership earned, never assigned | Done — declared `stands_for` + a measured 75; genesis refuses to start if a domain lacks two examiners |
 | Experiments legible to a non-specialist | Done — owner, room, step, falsifier, result and raw events on every card |
+| A rerun is not a discovery | Done — credit needs a newly admitted protocol, a frontier result, or a measured disagreement; refusals are on the Ledger |
+| Protocols admitted before they run | Done — moved by a member, admitted by an experiment-design examiner, refusable by constitutional judgment; first run mandatory |
 
 ---
 
@@ -428,7 +495,7 @@ python -m forge run          # genesis runs automatically; open http://localhost
 python -m forge protocols    # list the protocol library
 python -m forge verify       # re-walk and re-hash the entire chain
 python -m forge reproduce <experiment_id>
-pytest                       # 83 tests, ~2 minutes (protocols really execute)
+pytest                       # 99 tests, ~3 minutes (protocols really execute)
 ```
 
 **Adding a protocol** is the main way to extend the Forge: write one function in

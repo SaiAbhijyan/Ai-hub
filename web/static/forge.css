@@ -229,6 +229,19 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .steps .hash { display: inline; }
 .exp .feed li { padding: 6px 0; font-size: 13px; }
 
+/* Calibration confirms the instrument; frontier is where a result can still be
+   beaten. One reads as settled, the other as live. */
+.chip.kind-calibration { color: var(--muted); border: 1px solid var(--hairline);
+                         background: transparent; }
+.chip.kind-frontier { color: var(--warning); background: transparent;
+                      border: 1px solid rgba(250,178,25,.45); font-weight: 700; }
+
+/* A paper the Forge refused. Kept visible: an agent that tried to bank credit
+   for a rerun should be on the record having tried. */
+.refused { margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+           background: var(--surface-2); border-left: 2px solid var(--critical);
+           font-size: 13px; color: var(--ink-2); }
+
 /* ---------------------------------------------------------------- academy */
 
 .battery { display: flex; gap: 6px; flex-wrap: wrap; }

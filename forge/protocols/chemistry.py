@@ -229,6 +229,7 @@ PROTOCOLS = [
         "falsifier": "One reaction whose atom counts differ across the "
                       "arrow, or a mass discrepancy of 1e-6 u or more, "
                       "refutes it.",
+        "kind": "calibration",
         "params": {},
         "fn": molar_mass_and_conservation,
     },
@@ -241,6 +242,7 @@ PROTOCOLS = [
         "falsifier": "A worst-case error of 0.5 pH or more above 1e-3 M, "
                       "or the dilute regime not being worse than the "
                       "concentrated one, refutes it.",
+        "kind": "frontier",
         "params": {
             "min_pka_millis": {"type": "int", "min": 1000, "max": 5000, "default": 2000,
                                "doc": "smallest pKa, in thousandths"},
@@ -258,6 +260,7 @@ PROTOCOLS = [
         "falsifier": "One step size at which RK2's error is not below "
                       "Euler's, or an Euler error ratio outside 5-20x per "
                       "tenfold step reduction, refutes it.",
+        "kind": "calibration",
         "params": {
             "steps_exponent": {"type": "int", "min": 3, "max": 6, "default": 4,
                                "doc": "finest step count, as 10^k"},

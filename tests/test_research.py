@@ -7,7 +7,7 @@ import pytest
 os.environ["FORGE_MODE"] = "sim"
 
 from forge import exams, protocols
-from forge.actions import validate
+from forge.actions import CALIBRATION_COOLDOWN, validate
 from forge.agents import SimulatedAgent
 from forge.engine import Engine
 from forge.lab import reproduce, run_protocol
@@ -131,16 +131,45 @@ def test_an_experiment_must_name_a_real_protocol(tmp_path):
     assert err and "chartered" in err
 
 
+def completed_experiment(store, protocol_id="math.root_finding", actor="cassin",
+                         group_id="lab-math", xid="exp-planted"):
+    """Register and run one protocol for real, and record what it measured.
+
+    Deliberately not `engine.tick()` in a loop: which agent acts on which tick is
+    a lottery, and a rule about result hashes has nothing to do with scheduling.
+    `math.root_finding` is pure arithmetic and returns in milliseconds, and
+    `cassin` sits in `lab-math` from genesis, so this is deterministic on any
+    platform.
+    """
+    spec = protocols.get(protocol_id)
+    params = protocols.default_params(protocol_id)
+    payload = {"id": xid, "group_id": group_id, "title": spec["title"],
+               "hypothesis": spec["hypothesis"],
+               "method": f"Run {protocol_id} with default parameters.",
+               "protocol_id": protocol_id, "domain": spec["domain"],
+               "params": params}
+    err = validate(store, actor, "create_experiment", payload)
+    assert err is None, err
+    store.append(actor, "create_experiment", payload)
+
+    run = run_protocol(protocol_id, params)
+    assert run["ok"], f"{protocol_id} did not complete: {run.get('error')}"
+    result = {"experiment_id": xid, "status": "completed",
+              "findings": run["conclusion"], "results": run["results"],
+              "supported": run["supported"], "code_hash": run["code_hash"],
+              "result_hash": run["result_hash"], "environment": run["environment"],
+              "elapsed_seconds": run["elapsed_seconds"]}
+    err = validate(store, actor, "record_result", result)
+    assert err is None, err
+    store.append(actor, "record_result", result)
+    return store.experiment(xid)
+
+
 def test_a_paper_cannot_report_numbers_that_are_not_its_run(tmp_path):
     """Article VIII §2 — the hash must match the experiment on the Ledger."""
     store = Store(tmp_path / "f.db")
     seed(store)
-    engine = Engine(store, SimulatedAgent())
-    for _ in range(12):
-        engine.tick()
-    done = [x for x in store.experiments() if x["status"] == "completed"]
-    assert done, "no experiment completed in 12 ticks"
-    exp = done[0]
+    exp = completed_experiment(store)
 
     good = {"id": "art-x", "title": "t", "abstract": "a", "content": "c",
             "content_hash": "h", "authors": [exp["author_id"]], "kind": "paper",
@@ -386,3 +415,275 @@ def test_every_protocol_declares_what_would_refute_it():
         assert falsifier.rstrip().endswith("."), pid
         # It must describe a measured condition, not restate the hypothesis.
         assert falsifier != spec["hypothesis"], pid
+
+
+# ------------------------------------------ calibration, frontier and admission
+
+def test_every_protocol_declares_a_kind():
+    for pid, spec in protocols.REGISTRY.items():
+        assert spec.get("kind") in protocols.KINDS, (pid, spec.get("kind"))
+    frontier = {p for p in protocols.REGISTRY if protocols.is_frontier(p)}
+    assert frontier == {
+        "ai.kmeans_elbow", "chem.weak_acid_ph", "math.prime_counting",
+        "forge.tamper_detection", "forge.verification_cost", "forge.rebuild_fidelity",
+    }, frontier
+
+
+def test_a_calibration_rerun_is_not_a_paper(tmp_path):
+    """The point of the whole pack: confirming a settled protocol with fresh
+    parameters is a measurement of the instrument, not a finding."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    first = completed_experiment(store, xid="exp-first")
+    assert not protocols.is_frontier(first["protocol_id"])
+
+    paper = {"id": "art-1", "title": "t", "abstract": "a", "content": "c",
+             "content_hash": "h", "authors": [first["author_id"]], "kind": "paper",
+             "protocol_id": first["protocol_id"], "experiment_id": first["id"],
+             "result_hash": first["result_hash"], "supported": first["supported"],
+             "domain": first["domain"]}
+    assert validate(store, first["author_id"], "publish_artifact", paper) is None
+    store.append(first["author_id"], "publish_artifact", paper)
+
+    # A second run of the same calibration protocol, agreeing with the first.
+    store.set_tick(store.current_tick() + CALIBRATION_COOLDOWN + 1)
+    second = completed_experiment(store, xid="exp-second")
+    assert second["result_hash"] == first["result_hash"], "expected an agreeing rerun"
+
+    err = validate(store, second["author_id"], "publish_artifact", {
+        **paper, "id": "art-2", "experiment_id": second["id"],
+        "result_hash": second["result_hash"]})
+    assert err and "calibration protocol" in err, err
+    assert "already reports this result" in err
+
+
+def test_a_frontier_result_is_always_publishable(tmp_path):
+    """A frontier question is open, so every result on it can be beaten."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    exp = completed_experiment(store, protocol_id="math.prime_counting",
+                               xid="exp-frontier")
+    assert protocols.is_frontier(exp["protocol_id"])
+    paper = {"id": "art-f1", "title": "t", "abstract": "a", "content": "c",
+             "content_hash": "h", "authors": [exp["author_id"]], "kind": "paper",
+             "protocol_id": exp["protocol_id"], "experiment_id": exp["id"],
+             "result_hash": exp["result_hash"], "supported": exp["supported"],
+             "domain": exp["domain"]}
+    assert validate(store, exp["author_id"], "publish_artifact", paper) is None
+    store.append(exp["author_id"], "publish_artifact", paper)
+
+    store.set_tick(store.current_tick() + 1)
+    again = completed_experiment(store, protocol_id="math.prime_counting",
+                                 xid="exp-frontier-2")
+    assert validate(store, again["author_id"], "publish_artifact", {
+        **paper, "id": "art-f2", "experiment_id": again["id"],
+        "result_hash": again["result_hash"]}) is None
+
+
+def test_an_unsupported_result_is_still_a_paper(tmp_path):
+    """Article VII §5 and VIII §5. Refusing a *failed run* must not quietly
+    refuse a *refuted hypothesis* — those are opposite things."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    exp = completed_experiment(store, xid="exp-refuted")
+    # Same completed run, reported as refuting its hypothesis.
+    store.append(exp["author_id"], "record_result", {
+        "experiment_id": exp["id"], "status": "completed",
+        "findings": "The data did not support the hypothesis.",
+        "results": exp["results"], "supported": False,
+        "code_hash": exp["code_hash"], "result_hash": exp["result_hash"]})
+    refuted = store.experiment(exp["id"])
+    assert refuted["supported"] is False
+    assert validate(store, exp["author_id"], "publish_artifact", {
+        "id": "art-neg", "title": "t", "abstract": "a", "content": "c",
+        "content_hash": "h", "authors": [refuted["author_id"]], "kind": "paper",
+        "protocol_id": refuted["protocol_id"], "experiment_id": refuted["id"],
+        "result_hash": refuted["result_hash"], "supported": False,
+        "domain": refuted["domain"]}) is None
+
+
+def test_a_failed_run_is_not_a_paper(tmp_path):
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    spec = protocols.get("math.root_finding")
+    payload = {"id": "exp-crash", "group_id": "lab-math", "title": spec["title"],
+               "hypothesis": spec["hypothesis"], "method": "m",
+               "protocol_id": spec["id"], "domain": spec["domain"],
+               "params": protocols.default_params(spec["id"])}
+    assert validate(store, "cassin", "create_experiment", payload) is None
+    store.append("cassin", "create_experiment", payload)
+    store.append("cassin", "record_result", {
+        "experiment_id": "exp-crash", "status": "failed",
+        "findings": "The run did not complete: the instrument caught fire."})
+
+    err = validate(store, "cassin", "publish_artifact", {
+        "id": "art-crash", "title": "t", "abstract": "a", "content": "c",
+        "content_hash": "h", "authors": ["cassin"], "kind": "paper",
+        "protocol_id": spec["id"], "experiment_id": "exp-crash",
+        "result_hash": "deadbeef", "domain": spec["domain"]})
+    assert err and "did not complete is not a paper" in err, err
+
+
+def test_admit_then_run_before_any_paper(tmp_path):
+    """Admission gates the bench, and the first run is mandatory: there is no
+    paper on a protocol id until a result hash exists for it."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    pid = "math.root_finding"
+
+    # Genesis admitted the founding library, so unwind this one to test the gate.
+    store.conn.execute("DELETE FROM protocol_admissions WHERE protocol_id=?", (pid,))
+    store.conn.commit()
+    spec = protocols.get(pid)
+    payload = {"id": "exp-gate", "group_id": "lab-math", "title": spec["title"],
+               "hypothesis": spec["hypothesis"], "method": "m",
+               "protocol_id": pid, "domain": spec["domain"],
+               "params": protocols.default_params(pid)}
+    err = validate(store, "cassin", "create_experiment", payload)
+    assert err and "has not been admitted" in err, err
+
+    # Propose it, and it still may not run until a bench has ruled.
+    proposal = {"protocol_id": pid, "question": spec["question"],
+                "hypothesis": spec["hypothesis"], "falsifier": spec["falsifier"],
+                "params": spec["params"], "source": protocols.source_of(pid),
+                "pass_rule": "computed from the measurements", "baseline": ""}
+    assert validate(store, "nix", "propose_protocol", proposal) is None
+    store.append("nix", "propose_protocol", proposal)
+    err = validate(store, "cassin", "create_experiment", payload)
+    assert err and "has not been admitted" in err, err
+    assert not store.artifacts(protocol_id=pid)
+
+    # An experiment-design examiner admits it; now it may run.
+    assert "experiment design" in store.agent("cassin")["examiner_domains"]
+    admission = {"protocol_id": pid, "reason": "The method decides the question."}
+    assert validate(store, "cassin", "admit_protocol", admission) is None
+    store.append("cassin", "admit_protocol", admission)
+    assert store.is_admitted(pid)
+    assert validate(store, "cassin", "create_experiment", payload) is None
+
+    # And no paper exists on that id until a run has produced a result hash.
+    assert not store.artifacts(protocol_id=pid)
+    store.append("cassin", "create_experiment", payload)
+    err = validate(store, "cassin", "publish_artifact", {
+        "id": "art-gate", "title": "t", "abstract": "a", "content": "c",
+        "content_hash": "h", "authors": ["cassin"], "kind": "paper",
+        "protocol_id": pid, "experiment_id": "exp-gate", "result_hash": "x",
+        "domain": spec["domain"]})
+    assert err and "has not been closed" in err, err
+
+
+def test_nobody_rules_on_their_own_protocol_proposal(tmp_path):
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    pid = "math.root_finding"
+    store.conn.execute("DELETE FROM protocol_admissions WHERE protocol_id=?", (pid,))
+    store.conn.commit()
+    spec = protocols.get(pid)
+    store.append("cassin", "propose_protocol", {
+        "protocol_id": pid, "question": spec["question"],
+        "hypothesis": spec["hypothesis"], "falsifier": spec["falsifier"],
+        "params": spec["params"], "source": protocols.source_of(pid),
+        "pass_rule": "computed", "baseline": ""})
+    err = validate(store, "cassin", "admit_protocol",
+                   {"protocol_id": pid, "reason": "mine, and good"})
+    assert err and "its own protocol proposal" in err, err
+
+
+def test_a_proposal_must_publish_the_code_that_will_run(tmp_path):
+    """Article VII §7. If a proposal could describe the method in its own words,
+    admission would be a review of the prose rather than of the protocol."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    pid = "math.root_finding"
+    store.conn.execute("DELETE FROM protocol_admissions WHERE protocol_id=?", (pid,))
+    store.conn.commit()
+    spec = protocols.get(pid)
+    honest = {"protocol_id": pid, "question": spec["question"],
+              "hypothesis": spec["hypothesis"], "falsifier": spec["falsifier"],
+              "params": spec["params"], "source": protocols.source_of(pid),
+              "pass_rule": "computed", "baseline": ""}
+    assert validate(store, "nix", "propose_protocol", honest) is None
+
+    err = validate(store, "nix", "propose_protocol",
+                   {**honest, "source": "def measure(): return {'supported': True}"})
+    assert err and "not the source in the library" in err, err
+    err = validate(store, "nix", "propose_protocol",
+                   {**honest, "falsifier": "Nothing could refute this."})
+    assert err and "not the one the protocol declares" in err, err
+    # And a protocol that exists nowhere but the proposal cannot be introduced.
+    err = validate(store, "nix", "propose_protocol", {**honest, "protocol_id": "math.invented"})
+    assert err and "Article VII §7" in err, err
+
+
+def test_refusal_grounds_match_the_examinership(tmp_path):
+    """Constitutional judgment refuses what may not lawfully run; experiment
+    design refuses what cannot decide its question. Neither does the other's job."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    pid = "math.root_finding"
+    store.conn.execute("DELETE FROM protocol_admissions WHERE protocol_id=?", (pid,))
+    store.conn.commit()
+    spec = protocols.get(pid)
+    store.append("nix", "propose_protocol", {
+        "protocol_id": pid, "question": spec["question"],
+        "hypothesis": spec["hypothesis"], "falsifier": spec["falsifier"],
+        "params": spec["params"], "source": protocols.source_of(pid),
+        "pass_rule": "computed", "baseline": ""})
+
+    counsel = store.agent("wren")
+    assert "constitutional judgment" in counsel["examiner_domains"]
+    assert "experiment design" not in counsel["examiner_domains"]
+    assert validate(store, "wren", "refuse_protocol", {
+        "protocol_id": pid, "ground": "unconstitutional",
+        "reason": "It would authorise a run of unreviewed code."}) is None
+    err = validate(store, "wren", "refuse_protocol", {
+        "protocol_id": pid, "ground": "inadequate", "reason": "weak method"})
+    assert err and "experiment design" in err, err
+    err = validate(store, "wren", "admit_protocol",
+                   {"protocol_id": pid, "reason": "looks fine"})
+    assert err and "only an examiner in experiment design" in err, err
+
+    # And a refused protocol stays unrunnable.
+    store.append("wren", "refuse_protocol", {
+        "protocol_id": pid, "ground": "unconstitutional", "reason": "unreviewed code"})
+    err = validate(store, "cassin", "create_experiment", {
+        "id": "exp-refused", "group_id": "lab-math", "title": "t",
+        "hypothesis": "h", "method": "m", "protocol_id": pid,
+        "domain": spec["domain"], "params": protocols.default_params(pid)})
+    assert err and "refused" in err, err
+
+
+def test_calibration_cooldown_rests_a_settled_protocol(tmp_path):
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    first = completed_experiment(store, xid="exp-cool-1")
+    spec = protocols.get(first["protocol_id"])
+    payload = {"id": "exp-cool-2", "group_id": "lab-math", "title": "t",
+               "hypothesis": "h", "method": "m", "protocol_id": spec["id"],
+               "domain": spec["domain"], "params": protocols.default_params(spec["id"])}
+
+    store.set_tick(store.current_tick() + 2)
+    err = validate(store, "cassin", "create_experiment", payload)
+    assert err and "rests for" in err, err
+
+    store.set_tick(store.current_tick() + CALIBRATION_COOLDOWN)
+    assert validate(store, "cassin", "create_experiment", payload) is None
+
+
+def test_a_failure_or_a_disagreement_reopens_the_bench(tmp_path):
+    """The cooldown is skipped exactly when a rerun would be informative."""
+    store = Store(tmp_path / "f.db")
+    seed(store)
+    exp = completed_experiment(store, xid="exp-disagree")
+    spec = protocols.get(exp["protocol_id"])
+    payload = {"id": "exp-next", "group_id": "lab-math", "title": "t",
+               "hypothesis": "h", "method": "m", "protocol_id": spec["id"],
+               "domain": spec["domain"], "params": protocols.default_params(spec["id"])}
+    store.set_tick(store.current_tick() + 1)
+    assert validate(store, "cassin", "create_experiment", payload) is not None
+
+    # Rewrite the last run as a failure: the instrument is now the open question.
+    store.append("cassin", "record_result", {
+        "experiment_id": exp["id"], "status": "failed",
+        "findings": "The run did not complete: timeout."})
+    assert validate(store, "cassin", "create_experiment", payload) is None

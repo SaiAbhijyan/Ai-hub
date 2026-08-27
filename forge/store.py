@@ -278,6 +278,24 @@ class Store:
                     (row["candidate_id"], row["domain"], p["score"], p["assessment_id"],
                      tick, e["id"]))
 
+        elif t == "propose_protocol":
+            c.execute(
+                "INSERT OR REPLACE INTO protocol_admissions (protocol_id, proposer_id,"
+                " question, hypothesis, falsifier, pass_rule, baseline, status,"
+                " proposed_tick, proposed_event) VALUES (?,?,?,?,?,?,?, 'proposed',?,?)",
+                (p["protocol_id"], e["actor_id"], p.get("question", ""),
+                 p.get("hypothesis", ""), p.get("falsifier", ""),
+                 p.get("pass_rule", ""), p.get("baseline", ""), tick, e["id"]))
+
+        elif t in ("admit_protocol", "refuse_protocol"):
+            c.execute(
+                "UPDATE protocol_admissions SET status=?, decided_by=?,"
+                " decision_reason=?, ground=?, decided_tick=?, decided_event=?"
+                " WHERE protocol_id=?",
+                ("admitted" if t == "admit_protocol" else "refused", e["actor_id"],
+                 p.get("reason", ""), p.get("ground", ""), tick, e["id"],
+                 p["protocol_id"]))
+
         elif t == "run_drill":
             c.execute("INSERT INTO drills (event_id, mentor_id, trainee_id, domain, notes, tick)"
                       " VALUES (?,?,?,?,?,?)",
@@ -473,6 +491,37 @@ class Store:
         row = self.conn.execute("SELECT * FROM experiments WHERE id=?", (xid,)).fetchone()
         return self._experiment_dict(row) if row else None
 
+    def experiments_for_protocol(self, protocol_id: str) -> list[dict]:
+        """Every run of one protocol, newest first — the history the calibration
+        rules are decided against."""
+        rows = self.conn.execute(
+            "SELECT * FROM experiments WHERE protocol_id=? ORDER BY opened_tick DESC,"
+            " id DESC", (protocol_id,))
+        return [self._experiment_dict(r) for r in rows]
+
+    # ------------------------------------------------------- protocol admission
+
+    def protocol_admission(self, protocol_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM protocol_admissions WHERE protocol_id=?",
+            (protocol_id,)).fetchone()
+        return dict(row) if row else None
+
+    def protocol_admissions(self, status: str | None = None) -> list[dict]:
+        q = "SELECT * FROM protocol_admissions"
+        args: list = []
+        if status:
+            q += " WHERE status=?"
+            args.append(status)
+        return [dict(r) for r in
+                self.conn.execute(q + " ORDER BY proposed_event", args)]
+
+    def is_admitted(self, protocol_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT status FROM protocol_admissions WHERE protocol_id=?",
+            (protocol_id,)).fetchone()
+        return bool(row) and row["status"] == "admitted"
+
     def commons(self, limit: int = 60, agent_id: str | None = None,
                 topic: str | None = None) -> list[dict]:
         q = "SELECT * FROM commons"
@@ -533,7 +582,8 @@ class Store:
         d["supported"] = None if d["supported"] is None else bool(d["supported"])
         return d
 
-    def artifacts(self, domain: str | None = None, kind: str | None = None) -> list[dict]:
+    def artifacts(self, domain: str | None = None, kind: str | None = None,
+                  protocol_id: str | None = None) -> list[dict]:
         q = "SELECT * FROM artifacts"
         conds, args = [], []
         if domain:
@@ -542,6 +592,9 @@ class Store:
         if kind:
             conds.append("kind=?")
             args.append(kind)
+        if protocol_id:
+            conds.append("protocol_id=?")
+            args.append(protocol_id)
         if conds:
             q += " WHERE " + " AND ".join(conds)
         rows = self.conn.execute(q + " ORDER BY tick DESC", args)
@@ -599,6 +652,24 @@ class Store:
             payload = json.loads(r["payload"])
             if xid in (payload.get("id"), payload.get("experiment_id")):
                 out.append(dict(r, payload=payload))
+        return out
+
+    def publication_refusals(self, experiment_id: str | None = None) -> list[dict]:
+        """Papers the Forge refused, and why.
+
+        A refusal is as much a part of the record as a publication: an agent that
+        tried to bank credit for a calibration rerun should be visible having
+        tried. Read off the events rather than projected, because nothing else
+        needs to query it.
+        """
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE action_type='publication_refused' ORDER BY id")
+        out = []
+        for r in rows:
+            payload = json.loads(r["payload"])
+            if experiment_id and payload.get("experiment_id") != experiment_id:
+                continue
+            out.append(dict(r, payload=payload))
         return out
 
     def event(self, event_id: int) -> dict | None:

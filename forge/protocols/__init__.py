@@ -13,6 +13,7 @@ A protocol declares:
     falsifier   the measured condition under which `supported` comes out False,
                 stated in words. If the falsifier and the code ever disagree,
                 the code is the truth and the falsifier is the bug.
+    kind        "calibration" or "frontier" — see KINDS below.
     params      {name: {type, min, max, default, doc}}
     fn          the callable that performs the measurement
 
@@ -46,6 +47,22 @@ DOMAINS = [
     "forge systems",
 ]
 
+# Every protocol is one of two things, and the difference decides what a run of
+# it is worth.
+#
+#   calibration  The answer is already known and the code agrees with it. Running
+#                it proves the instrument still works, which is worth doing and
+#                worth recording — but a rerun with a fresh seed discovers
+#                nothing, and the Forge will not award it a paper.
+#   frontier     The question is genuinely open, or the method is known to be
+#                imperfect and nobody has yet measured how imperfect. A result
+#                here can be beaten or refuted, so it is always publishable.
+#
+# A protocol is frontier until it is beaten. Nothing here decides that
+# automatically: promoting a settled question back to calibration is a judgement
+# about the state of knowledge, and it belongs in a human-reviewed commit.
+KINDS = ("calibration", "frontier")
+
 _MODULES = [mathematics, physics, chemistry, lifescience, computerscience, ai, forgesystems]
 
 REGISTRY: dict[str, dict] = {}
@@ -58,6 +75,9 @@ for _module in _MODULES:
         # A protocol that cannot say what would refute it is not an experiment.
         if not _spec.get("falsifier"):
             raise RuntimeError(f"protocol {_spec['id']} declares no falsifier")
+        if _spec.get("kind") not in KINDS:
+            raise RuntimeError(
+                f"protocol {_spec['id']} must declare kind {' or '.join(KINDS)}")
         REGISTRY[_spec["id"]] = _spec
 
 
@@ -67,6 +87,16 @@ def get(protocol_id: str) -> dict | None:
 
 def by_domain(domain: str) -> list[dict]:
     return [s for s in REGISTRY.values() if s["domain"] == domain]
+
+
+def kind_of(protocol_id: str) -> str:
+    spec = REGISTRY.get(protocol_id)
+    return spec["kind"] if spec else ""
+
+
+def is_frontier(protocol_id: str) -> bool:
+    """True where a result can still be beaten or refuted, and so is worth a paper."""
+    return kind_of(protocol_id) == "frontier"
 
 
 def all_ids() -> list[str]:

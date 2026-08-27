@@ -206,6 +206,9 @@ PROTOCOLS = [
         "falsifier": "A failed verification at any chain length, or a "
                       "per-event cost varying by 3x or more across "
                       "lengths, refutes it.",
+        # Frontier because it does not yet pass on every platform:
+        # the Windows run fails, so the claim is not settled.
+        "kind": "frontier",
         "params": {
             "max_events": {"type": "int", "min": 500, "max": 20000, "default": 1500,
                            "doc": "longest chain to benchmark"},
@@ -220,6 +223,9 @@ PROTOCOLS = [
         "hypothesis": "Every projection table is byte-identical after a full replay, as Article II section 4 requires.",
         "falsifier": "One projection table that differs after a full "
                       "replay from the Ledger refutes it.",
+        # Frontier because it does not yet pass on every platform:
+        # the Windows run fails, so the claim is not settled.
+        "kind": "frontier",
         "params": {
             "events": {"type": "int", "min": 100, "max": 3000, "default": 250,
                        "doc": "chain length to build before replaying"},
@@ -234,6 +240,9 @@ PROTOCOLS = [
         "hypothesis": "Every single-event forgery is detected by chain verification.",
         "falsifier": "A single forged event that chain verification does "
                       "not catch refutes it.",
+        # Frontier because it does not yet pass on every platform:
+        # the Windows run fails, so the claim is not settled.
+        "kind": "frontier",
         "params": {
             "trials": {"type": "int", "min": 5, "max": 100, "default": 12,
                        "doc": "number of independent forgery attempts"},

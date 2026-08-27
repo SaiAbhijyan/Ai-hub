@@ -196,6 +196,7 @@ PROTOCOLS = [
         "hypothesis": "Absolute error stays within a small constant factor of 1.64/sqrt(N) across four decades of N.",
         "falsifier": "Any sample size where the measured error exceeds 4x "
                       "the 1.64/sqrt(N) prediction refutes it.",
+        "kind": "calibration",
         "params": {
             "max_exponent": {"type": "int", "min": 3, "max": 6, "default": 5,
                              "doc": "largest sample size, as 10^k"},
@@ -213,6 +214,7 @@ PROTOCOLS = [
         "falsifier": "A single decade where the relative error of N/ln(N) "
                       "fails to fall below the previous decade's refutes "
                       "it.",
+        "kind": "frontier",
         "params": {
             "limit_exponent": {"type": "int", "min": 3, "max": 7, "default": 6,
                                "doc": "sieve limit, as 10^k"},
@@ -227,6 +229,7 @@ PROTOCOLS = [
         "hypothesis": "Newton converges in fewer iterations than bisection on every test function.",
         "falsifier": "One test function on which Newton needs as many "
                       "iterations as bisection, or more, refutes it.",
+        "kind": "calibration",
         "params": {
             "tolerance_exponent": {"type": "int", "min": 6, "max": 14, "default": 12,
                                    "doc": "convergence tolerance, as 10^-k"},

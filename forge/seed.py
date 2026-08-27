@@ -436,6 +436,8 @@ def seed(store: Store) -> int:
             raise RuntimeError(f"genesis action refused: {actor} {action_type}: {err}")
         store.append(actor, action_type, payload, tick=0)
 
+    admit_founding_library(store, agent_act)
+
     for actor, gid, text in OPENING_REMARKS:
         agent_act(actor, "post_message", {"group_id": gid, "text": text})
 
@@ -588,6 +590,74 @@ def run_founding_examination(store: Store, tick: int = 0) -> None:
             store.append("forge", "grade_assessment", {
                 "assessment_id": aid, "score": score, "marks": marks, "notes": notes,
             }, tick=tick)
+
+
+def admit_founding_library(store: Store, agent_act) -> None:
+    """Put the whole starting library through admission before anything runs.
+
+    The protocols already exist in `forge/protocols/`, committed and reviewed by
+    a human, which is what Article VII §7 requires. Admission is the Forge's own
+    review on top of that: an experiment-design examiner reads the question, the
+    falsifier, the pass rule and the source, and says whether the method can
+    decide what it claims to decide. Nothing may be run until it has.
+
+    Each protocol is moved by a member of the laboratory chartered for it, and
+    ruled on by whichever of the two experiment-design examiners did not move it,
+    so no protocol is admitted by its own proposer.
+    """
+    from . import protocols
+
+    lab_for = {d: g["id"] for g in GROUPS for d in (g.get("domains") or [])}
+    members_of = {g["id"]: list(g.get("members") or []) for g in GROUPS}
+    benches = [a["id"] for a in store.agents(standing="examiner")
+               if "experiment design" in a["examiner_domains"]]
+    if len(benches) < 2:
+        raise RuntimeError("Article IV §8: experiment design needs two examiners "
+                           "before the library can be admitted")
+
+    # Several laboratories are chartered but unstaffed at genesis, so their
+    # protocols are moved by the wider membership rather than by nobody. The
+    # rotation keeps the founding record from reading as one agent moving fifteen
+    # protocols single-handed.
+    floor = [a["id"] for a in store.agents()
+             if a["standing"] in ("member", "examiner") and a["id"] not in benches]
+
+    for i, pid in enumerate(protocols.all_ids()):
+        spec = protocols.get(pid)
+        lab = lab_for.get(spec["domain"])
+        pool = [m for m in members_of.get(lab, []) if store.agent(m)]
+        # Prefer a mover from the laboratory that will run it; failing that, take
+        # the next agent in the rotation. Either way the admitter is chosen after,
+        # so no protocol is admitted by its own proposer.
+        mover = next((m for m in pool if m not in benches), None)
+        if mover is None:
+            mover = floor[i % len(floor)] if floor else pool[0]
+        # Alternate the bench. Article IV §8 gives every domain two examiners so
+        # that neither is the sole authority on it; letting the first in the list
+        # admit all twenty-one would make the second one decoration.
+        admitter = benches[i % len(benches)]
+        if admitter == mover:
+            admitter = next(b for b in benches if b != mover)
+
+        agent_act(mover, "propose_protocol", {
+            "protocol_id": pid,
+            "question": spec["question"],
+            "hypothesis": spec["hypothesis"],
+            "falsifier": spec["falsifier"],
+            "params": spec["params"],
+            "source": protocols.source_of(pid),
+            "pass_rule": (f"`supported` is computed inside the protocol from the "
+                          f"measurements it returns. {spec['falsifier']}"),
+            # The founding library has nothing to beat: it is the baseline.
+            "baseline": "",
+        })
+        agent_act(admitter, "admit_protocol", {
+            "protocol_id": pid,
+            "reason": (f"Read the source, the falsifier and the pass rule. The "
+                       f"method can decide the question it states, and the verdict "
+                       f"is computed from the measurements rather than declared. "
+                       f"Admitted as a {spec['kind']} protocol."),
+        })
 
 
 def seat_the_founders(store: Store, tick: int = 0) -> None:

@@ -15,15 +15,34 @@ PROPOSAL_KINDS = {"general", "charter_group", "admit_agent", "appoint_examiner",
 VOTE_CHOICES = {"for", "against", "abstain"}
 COMMONS_TOPICS = {"welcome", "milestone", "reading", "off-duty", "question", "thanks"}
 ARTIFACT_KINDS = {"paper", "replication", "method_proposal", "invention_disclosure"}
+REFUSAL_GROUNDS = {"unconstitutional", "inadequate"}
+
+# How long a calibration protocol rests between runs.
+#
+# A calibration protocol's answer is already known, so a second run measures the
+# instrument rather than the world. That is worth doing periodically and worth
+# recording — the Forge should notice if arithmetic stops working — but running
+# it every few ticks is how an agent manufactures a body of work out of nothing.
+# Thirty ticks is roughly four engine rotations at ACTORS_PER_TICK=2, long enough
+# that a lab must go and find something new to do in between.
+#
+# The rest is skipped whenever a rerun would actually be informative: if the last
+# run failed, or if it disagreed with the run before it, the instrument is the
+# open question and it should be re-run at once.
+CALIBRATION_COOLDOWN = 30
 
 # Actions each standing may take (Articles III, IV, VI, XI).
 ALLOWED = {
     "candidate": {"post_message", "update_profile", "submit_answers", "post_commons"},
     "member": {"post_message", "update_profile", "create_proposal", "cast_vote",
                "create_experiment", "record_result", "publish_artifact", "join_group",
-               "run_drill", "acknowledge_suggestion", "post_commons"},
+               "run_drill", "acknowledge_suggestion", "post_commons",
+               "propose_protocol"},
 }
-ALLOWED["examiner"] = ALLOWED["member"] | {"open_assessment", "grade_assessment"}
+# Admitting and refusing a protocol are examiner powers: which domain of
+# examinership they require is checked per action, below.
+ALLOWED["examiner"] = ALLOWED["member"] | {"open_assessment", "grade_assessment",
+                                           "admit_protocol", "refuse_protocol"}
 # The administrator's assistant serves the human, not the Forge: it briefs and
 # talks, but never votes, experiments, examines or publishes.
 ALLOWED["aide"] = {"post_commons", "aide_analysis", "update_profile"}
@@ -45,7 +64,96 @@ REQUIRED_FIELDS = {
     "acknowledge_suggestion": ["suggestion_event_id", "response"],
     "post_commons": ["topic", "text"],
     "aide_analysis": ["suggestion_id", "reading", "recommendation"],
+    "propose_protocol": ["protocol_id", "question", "hypothesis", "falsifier",
+                         "params", "source", "pass_rule", "baseline"],
+    "admit_protocol": ["protocol_id", "reason"],
+    "refuse_protocol": ["protocol_id", "reason", "ground"],
 }
+
+
+def _closed_runs(store: Store, protocol_id: str) -> list[dict]:
+    """Every finished run of a protocol, newest first."""
+    return [x for x in store.experiments_for_protocol(protocol_id)
+            if x["status"] in ("completed", "failed")]
+
+
+def rerun_is_informative(store: Store, protocol_id: str) -> bool:
+    """True when running a settled protocol again would actually tell us something.
+
+    Two cases: the last run failed, so the instrument itself is now in question;
+    or the last two runs disagreed, so one of them is wrong and nobody yet knows
+    which. Both are reasons to go back to the bench immediately.
+    """
+    closed = _closed_runs(store, protocol_id)
+    if not closed:
+        return True
+    if closed[0]["status"] == "failed":
+        return True
+    hashes = [x["result_hash"] for x in closed if x["status"] == "completed"]
+    return len(hashes) >= 2 and hashes[0] != hashes[1]
+
+
+def calibration_cooldown_error(store: Store, spec: dict, tick: int) -> str | None:
+    """Rate-limit reruns of a protocol whose answer is already known."""
+    if spec["kind"] != "calibration":
+        return None
+    history = store.experiments_for_protocol(spec["id"])
+    if not history:
+        return None                      # the mandatory first run is never blocked
+    if rerun_is_informative(store, spec["id"]):
+        return None
+    running = [x for x in history if x["status"] == "running"]
+    if running:
+        return (f"{spec['id']} is already running as {running[0]['id']} — one live "
+                f"replication at a time for a calibration protocol")
+    since = tick - max(x["opened_tick"] for x in history)
+    if since < CALIBRATION_COOLDOWN:
+        return (f"{spec['id']} is a calibration protocol and was last run "
+                f"{since} tick{'' if since == 1 else 's'} ago; it rests for "
+                f"{CALIBRATION_COOLDOWN}. Re-run it sooner only when the last run "
+                f"failed or disagreed with the one before it")
+    return None
+
+
+def calibration_credit_error(store: Store, exp: dict) -> str | None:
+    """Decide whether a completed run has earned a publication.
+
+    A rerun of a calibration protocol with a fresh seed re-confirms something the
+    Forge already knew and already published. Recording it on the Experiment
+    Board is right; awarding it a paper is how an archive fills with work that
+    discovered nothing. Credit needs one of three things:
+
+      * a first result on this protocol — which is what a newly admitted protocol
+        always produces, and the reason the first run is mandatory;
+      * a frontier protocol, where the question is open and any result can be
+        beaten or refuted;
+      * a measured disagreement with what is already published — a different
+        verdict, or the same parameters returning different numbers.
+    """
+    protocol_id = exp["protocol_id"]
+    if not protocol_id:
+        return None
+    published = [a for a in store.artifacts(protocol_id=protocol_id)
+                 if a["kind"] in ("paper", "replication")
+                 and a["experiment_id"] != exp["id"]]
+    if not published:
+        return None
+    if protocols.is_frontier(protocol_id):
+        return None
+    for prior in published:
+        if prior["supported"] is not None and exp["supported"] is not None \
+                and bool(prior["supported"]) != bool(exp["supported"]):
+            return None                  # a refutation of what we published
+        prior_exp = store.experiment(prior["experiment_id"])
+        if prior_exp and prior_exp["params"] == exp["params"] \
+                and prior_exp["result_hash"] and exp["result_hash"] \
+                and prior_exp["result_hash"] != exp["result_hash"]:
+            return None                  # same inputs, different numbers
+    return (f"{protocol_id} is a calibration protocol and "
+            f"{published[0]['id']} already reports this result. A rerun with new "
+            f"parameters confirms the instrument, not a finding — credit needs a "
+            f"newly admitted protocol, a frontier result, or a measured "
+            f"disagreement with what is already published")
 
 
 def validate(store: Store, actor_id: str, action_type: str, payload: dict) -> str | None:
@@ -138,6 +246,16 @@ def validate(store: Store, actor_id: str, action_type: str, payload: dict) -> st
         _, param_error = protocols.validate_params(spec["id"], payload.get("params", {}))
         if param_error:
             return param_error
+        # Admission gates the bench, not just the paper, so the order is always
+        # admit -> run -> publish and the mandatory first run is structural.
+        admission = store.protocol_admission(spec["id"])
+        if admission is None or admission["status"] != "admitted":
+            state = admission["status"] if admission else "never proposed"
+            return (f"{spec['id']} has not been admitted to the library ({state}) — "
+                    f"an experiment-design examiner admits a protocol before it runs")
+        cooldown = calibration_cooldown_error(store, spec, store.current_tick())
+        if cooldown:
+            return cooldown
 
     elif action_type == "record_result":
         exp = store.experiment(payload["experiment_id"])
@@ -179,11 +297,85 @@ def validate(store: Store, actor_id: str, action_type: str, payload: dict) -> st
                 return f"a {kind} must cite the experiment it reports"
             if exp["status"] == "running":
                 return "cannot publish an experiment that has not been closed"
+            if exp["status"] == "failed":
+                # Not the same thing as a refuted hypothesis, which is published in
+                # full under Article VII §5. This is a run that never produced a
+                # measurement at all — a crash, a timeout, a refused parameter —
+                # and there is nothing in it to report.
+                return ("a run that did not complete is not a paper: it produced no "
+                        "measurements. The failure stays on the Experiment Board, "
+                        "where Article VII §4 requires it")
             if not payload.get("result_hash"):
                 return "a paper must carry the result hash of its run"
             if payload["result_hash"] != exp["result_hash"]:
                 return ("result hash does not match the experiment on the Ledger — "
                         "a paper may only report the numbers its run produced")
+            credit = calibration_credit_error(store, exp)
+            if credit:
+                return credit
+
+    elif action_type == "propose_protocol":
+        pid = payload["protocol_id"]
+        spec = protocols.get(pid)
+        # Article VII §7: an agent may not execute code of its own authorship, and
+        # a protocol is human-reviewed before it enters the library. A proposal is
+        # therefore the Forge's own review of code a human has already committed —
+        # never a way to introduce new code through the Ledger.
+        if spec is None:
+            return (f"no such protocol '{pid}' — Article VII §7: a protocol enters "
+                    f"the library by human review, not by proposal")
+        existing = store.protocol_admission(pid)
+        if existing and existing["status"] == "admitted":
+            return f"{pid} is already admitted"
+        if existing and existing["status"] == "proposed":
+            return f"{pid} is already before the examiners"
+        # The specification must describe the code that will actually run. If the
+        # proposal could restate the method in its own words, admission would be a
+        # review of the prose rather than of the protocol.
+        if payload["source"] != protocols.source_of(pid):
+            return ("the source in this proposal is not the source in the library — "
+                    "a proposal must publish the code that will actually run")
+        if payload["falsifier"] != spec["falsifier"]:
+            return ("the falsifier in this proposal is not the one the protocol "
+                    "declares")
+        if payload["params"] != spec["params"]:
+            return "the parameters in this proposal are not the protocol's parameters"
+        for field in ("question", "hypothesis", "pass_rule"):
+            if not str(payload[field]).strip():
+                return f"a protocol proposal must state its {field.replace('_', ' ')}"
+        baseline = payload["baseline"]
+        if baseline and not any(x["result_hash"] == baseline
+                                for x in store.experiments_for_protocol(pid)):
+            return ("baseline names a result hash that is not on the Ledger — "
+                    "a protocol may only be asked to beat a measured result")
+
+    elif action_type in ("admit_protocol", "refuse_protocol"):
+        pid = payload["protocol_id"]
+        row = store.protocol_admission(pid)
+        if row is None:
+            return f"no proposal for protocol '{pid}'"
+        if row["status"] != "proposed":
+            return f"{pid} has already been {row['status']}"
+        if row["proposer_id"] == actor_id:
+            # The same rule as Article IV §4 for examinations: nobody sits in
+            # judgement on their own submission.
+            return "an examiner may not rule on its own protocol proposal"
+        if action_type == "admit_protocol":
+            if "experiment design" not in actor["examiner_domains"]:
+                return ("only an examiner in experiment design admits a protocol — "
+                        "admission is a judgement about whether the method can decide "
+                        "the question")
+        else:
+            ground = payload["ground"]
+            if ground not in REFUSAL_GROUNDS:
+                return f"refusal ground must be one of {', '.join(sorted(REFUSAL_GROUNDS))}"
+            needed = ("constitutional judgment" if ground == "unconstitutional"
+                      else "experiment design")
+            if needed not in actor["examiner_domains"]:
+                return (f"a refusal on {ground} grounds is for an examiner in "
+                        f"{needed}")
+        if not str(payload["reason"]).strip():
+            return f"{action_type} must record its reason"
 
     elif action_type == "post_commons":
         if payload["topic"] not in COMMONS_TOPICS:

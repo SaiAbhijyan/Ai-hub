@@ -278,6 +278,7 @@ PROTOCOLS = [
         "falsifier": "No divergence anywhere in the sweep, no convergence "
                       "anywhere, or a best-recovered weight error of 0.1 or "
                       "more, refutes it.",
+        "kind": "calibration",
         "params": {
             "epochs": {"type": "int", "min": 50, "max": 1000, "default": 200,
                        "doc": "training epochs per learning rate"},
@@ -296,6 +297,7 @@ PROTOCOLS = [
         "falsifier": "Test accuracy within 5 points of the majority "
                       "baseline, or a final training log-loss no better "
                       "than the first, refutes it.",
+        "kind": "calibration",
         "params": {
             "samples": {"type": "int", "min": 200, "max": 4000, "default": 800,
                         "doc": "total examples before the 70/30 split"},
@@ -314,6 +316,7 @@ PROTOCOLS = [
         "falsifier": "Inertia rising at any k, or the largest second "
                       "difference landing on a k other than the planted "
                       "cluster count, refutes it.",
+        "kind": "frontier",
         "params": {
             "clusters": {"type": "int", "min": 2, "max": 8, "default": 4,
                          "doc": "true number of generating centres"},

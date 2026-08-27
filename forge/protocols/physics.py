@@ -185,6 +185,7 @@ PROTOCOLS = [
         "falsifier": "Worst-case relative energy drift under "
                       "Velocity-Verlet coming out at or above explicit "
                       "Euler's refutes it.",
+        "kind": "calibration",
         "params": {
             "orbits": {"type": "int", "min": 2, "max": 40, "default": 8,
                        "doc": "number of orbits to integrate"},
@@ -202,6 +203,7 @@ PROTOCOLS = [
         "falsifier": "Range failing to fall at any step of the drag sweep, "
                       "or the zero-drag range missing the analytic value by "
                       "1% or more, refutes it.",
+        "kind": "calibration",
         "params": {
             "max_drag_millis": {"type": "int", "min": 50, "max": 2000, "default": 500,
                                 "doc": "largest drag coefficient, in thousandths"},
@@ -219,6 +221,7 @@ PROTOCOLS = [
         "falsifier": "Period failing to increase at any amplitude step, or "
                       "the smallest amplitude differing from the small-angle "
                       "formula by 1% or more, refutes it.",
+        "kind": "calibration",
         "params": {
             "max_amplitude_deg": {"type": "int", "min": 20, "max": 150, "default": 90,
                                   "doc": "largest release angle in degrees"},

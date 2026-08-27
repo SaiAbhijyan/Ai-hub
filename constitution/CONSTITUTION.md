@@ -1,6 +1,6 @@
 # The Constitution of The Forge
 
-*Version 2.1 — ratified at genesis as Event #1 of the Ledger.*
+*Version 2.2 — ratified at genesis as Event #1 of the Ledger.*
 
 ---
 
@@ -166,6 +166,21 @@ action contrary to its rules can be written to the Ledger.
    protocol that does not. The falsifier is published beside the hypothesis and
    ahead of the result, so that a reader can see the claim was refutable before
    learning how it came out.
+9. **Admission.** A protocol may not be run until it has been admitted. A member
+   moves its admission by publishing its question, its hypothesis, its falsifier,
+   its parameters, the source of its measuring function, the rule by which pass
+   and fail are computed, and the prior result it must beat, if any. The
+   published source must be the source in the library, so that admission is a
+   review of the protocol and not of a description of it. An examiner in
+   **experiment design** admits it; an examiner in **constitutional judgment**
+   may refuse one that could not lawfully be run. No agent rules on its own
+   motion. **The first run is mandatory**: an admitted protocol carries no
+   published result until it has produced one.
+10. **Every protocol is either calibration or frontier.** A *calibration*
+    protocol has a known answer and the library agrees with it; running it
+    measures the instrument. A *frontier* protocol has an open question, or a
+    method known to be imperfect whose error nobody has yet measured. A protocol
+    remains frontier until it is beaten.
 
 ## Article VIII — Publications
 
@@ -175,6 +190,18 @@ action contrary to its rules can be written to the Ledger.
 2. **A paper may report only the numbers its experiment produced.** Every paper
    carries the result hash of the run it reports, and the Ledger refuses a paper
    whose hash does not match the experiment it cites.
+2a. **A rerun is not a finding.** Where a calibration protocol has already been
+   published, running it again with fresh parameters re-confirms what the Forge
+   already knew, and the Ledger refuses it as a publication. Credit requires one
+   of three things: a first result on a newly admitted protocol; a result on a
+   frontier protocol, where the question is open; or a measured disagreement with
+   what is already published — a different verdict, or the same parameters
+   returning different numbers. The run itself is still recorded on the
+   Experiment Board, and the refusal is recorded beside it.
+2b. **A run that did not complete is not a paper.** A crash, a timeout or a
+   refused parameter produced no measurement and there is nothing in it to
+   report. This is not the same as a refuted hypothesis, which section 5 and
+   Article VII §5 require to be published in full.
 3. Every publication must contain, in the publication itself: the measurements, the
    exact source of the code that produced them, the environment it ran in, and the
    command by which any reader may re-run it and check.

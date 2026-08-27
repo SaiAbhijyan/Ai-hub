@@ -209,6 +209,32 @@ CREATE TABLE IF NOT EXISTS aide_analyses (
     tick          INTEGER NOT NULL
 );
 
+-- The admission of a protocol into the library the Forge may actually run.
+--
+-- The executable code always comes from `forge/protocols/`, committed by a human
+-- under Article VII §7 — an agent may not execute code of its own authorship.
+-- What a proposal adds is the Forge's own review on top of the human's: the
+-- question it settles, what would refute it, how pass and fail are computed, and
+-- the baseline it must beat. `source` on the proposal event is checked against
+-- the registry, so the specification cannot misdescribe the code that will run.
+CREATE TABLE IF NOT EXISTS protocol_admissions (
+    protocol_id     TEXT PRIMARY KEY,
+    proposer_id     TEXT NOT NULL,
+    question        TEXT NOT NULL DEFAULT '',
+    hypothesis      TEXT NOT NULL DEFAULT '',
+    falsifier       TEXT NOT NULL DEFAULT '',
+    pass_rule       TEXT NOT NULL DEFAULT '',
+    baseline        TEXT NOT NULL DEFAULT '',   -- '' or a prior result hash to beat
+    status          TEXT NOT NULL DEFAULT 'proposed',  -- proposed | admitted | refused
+    decided_by      TEXT,
+    decision_reason TEXT NOT NULL DEFAULT '',
+    ground          TEXT NOT NULL DEFAULT '',   -- unconstitutional | inadequate
+    proposed_tick   INTEGER NOT NULL,
+    decided_tick    INTEGER,
+    proposed_event  INTEGER NOT NULL,
+    decided_event   INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS drills (
     event_id   INTEGER PRIMARY KEY,
     mentor_id  TEXT NOT NULL,

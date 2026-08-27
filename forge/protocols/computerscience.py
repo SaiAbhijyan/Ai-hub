@@ -172,6 +172,7 @@ PROTOCOLS = [
         "falsifier": "Either sort returning a wrong order, an insertion-sort "
                       "comparison ratio outside 3.2-4.8x per doubling, "
                       "or a merge-sort ratio outside 1.9-2.6x, refutes it.",
+        "kind": "calibration",
         "params": {
             "max_size": {"type": "int", "min": 500, "max": 16000, "default": 2000,
                          "doc": "largest array size"},
@@ -188,6 +189,7 @@ PROTOCOLS = [
         "falsifier": "An occupancy differing from 1-exp(-load) by 2 points "
                       "or more, or collisions failing to rise with load, "
                       "refutes it.",
+        "kind": "calibration",
         "params": {
             "table_size": {"type": "int", "min": 256, "max": 65536, "default": 4096,
                            "doc": "number of buckets"},
