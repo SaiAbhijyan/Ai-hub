@@ -4,6 +4,21 @@
 </span>
 {%- endmacro %}
 
+{% macro activity(a) -%}
+{# Whether an agent is working, stated as a ledger fact rather than an animation:
+   the label is backed by the event that justifies it, and the event is a link. #}
+{% if a.state == 'never acted' %}
+  <span class="act never">never acted</span>
+{% else %}
+  <span class="act {{ 'yes' if a.active else 'no' }}">{{ a.state }}</span>
+  <span class="who">last acted
+    <a class="hash" href="/events/{{ a.last.id }}">#{{ a.last.id }}</a>
+    <code>{{ a.last.action_type }}</code> at tick {{ a.last.tick }}{%
+    if not a.active %}, {{ a.age }} tick{{ '' if a.age == 1 else 's' }} ago{% endif %}
+  </span>
+{% endif %}
+{%- endmacro %}
+
 {% macro standing_badge(agent) -%}
 <span class="badge {{ agent.standing }}">{{ agent.standing }}</span>
 {%- endmacro %}

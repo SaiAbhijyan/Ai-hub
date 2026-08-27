@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Iterable
 
 from .actions import validate
@@ -23,6 +24,23 @@ VOTING_WINDOW = 8  # default ticks a proposal stays open; agents may choose long
 CANDIDATE_INTERVAL = 40  # ticks between new candidates presenting to the Academy
 EXPERIMENT_MATURITY = 2  # ticks between registering a protocol run and executing it
 RUNS_PER_TICK = 1        # protocol executions per tick; real code costs real seconds
+
+# How long an agent may go without authoring anything before the Forge calls it
+# idle. Forty ticks is roughly twenty rotations at ACTORS_PER_TICK=2, so an agent
+# has to miss its turn many times over before the label changes.
+IDLE_TICKS = int(os.environ.get("FORGE_IDLE_TICKS", "40"))
+
+# How long a chartered laboratory may go without registering an experiment,
+# moving a proposal, ruling on a protocol or publishing before the Forge says so
+# on the Floor. Longer than an agent's window, because a lab is several agents
+# and a quiet week is not the same as an abandoned bench.
+LAB_IDLE_TICKS = int(os.environ.get("FORGE_LAB_IDLE_TICKS", "50"))
+
+# How long an examinership survives without being used. Article IV as amended:
+# the post is held on condition of use, and an examiner who neither sits nor
+# grades its domain for this long loses it there. Longer again, because losing
+# an office should take real neglect rather than one quiet stretch.
+EXAMINER_LAPSE_TICKS = int(os.environ.get("FORGE_EXAMINER_LAPSE_TICKS", "80"))
 
 
 class Engine:
@@ -47,6 +65,8 @@ class Engine:
         appended += self.close_expired_proposals(tick)
         appended += self.admit_new_candidate(tick)
         appended += self.brief_administrator(tick)
+        appended += self.notice_idle_labs(tick)
+        appended += self.lapse_unused_examinerships(tick)
 
         for agent in self.pick_actors(tick):
             context = self.build_context(agent, tick)
@@ -128,6 +148,115 @@ class Engine:
                                   dict(persona, standing="candidate",
                                        examiner_domains=[], initial_capabilities={},
                                        avatar_seed=persona["id"]), tick)]
+
+    # A laboratory's work: the events that mean the bench is in use. A group that
+    # produced none of these has gone quiet, whatever its members were saying.
+    LAB_WORK = ("create_experiment", "record_result", "create_proposal",
+                "propose_protocol", "admit_protocol", "refuse_protocol",
+                "publish_artifact")
+
+    def notice_idle_labs(self, tick: int) -> list[dict]:
+        """Say on the Floor that a chartered laboratory has gone quiet.
+
+        This is a notice and nothing else. It never registers an experiment,
+        never starts a run, and carries no instruction an agent is expected to
+        obey — the Forge is not permitted to manufacture activity in order to
+        look busy. Whether anyone picks the work up is theirs to decide, and if
+        nobody does, the silence is on the record where a human can see it.
+        """
+        if tick <= 0:
+            return []
+        store = self.store
+        cutoff = tick - LAB_IDLE_TICKS
+        if cutoff < 0:
+            return []                     # the Forge has not been running long enough
+
+        appended = []
+        for group in store.groups():
+            if not group.get("domains"):
+                continue                  # not a laboratory; nothing to run
+            if store.group_worked_since(group["id"], cutoff, self.LAB_WORK):
+                continue
+            if store.idle_notices(group["id"], since_tick=cutoff):
+                continue                  # one notice per group per window
+            item = self.frontier_item(group)
+            appended.append(store.append("forge", "lab_idle_notice", {
+                "group_id": group["id"], "group_name": group["name"],
+                "idle_since_tick": cutoff,
+                "frontier_protocol": item["id"] if item else "",
+                "frontier_question": item["question"] if item else "",
+            }, tick))
+        return appended
+
+    @staticmethod
+    def frontier_item(group: dict) -> dict | None:
+        """The open question this laboratory is chartered for, if it has one."""
+        from . import protocols
+        for domain in group.get("domains") or []:
+            for spec in protocols.by_domain(domain):
+                if spec["kind"] == "frontier":
+                    return spec
+        return None
+
+    def lapse_unused_examinerships(self, tick: int) -> list[dict]:
+        """Article IV: an examinership is held on condition of use.
+
+        An examiner who has neither sat nor graded its domain for the whole
+        window loses the post there — not everywhere, and its `stands_for`
+        declaration survives, so it may stand again. Recovery is the ordinary
+        route: sit the domain at the band its record now earns, score 75 or
+        above, marked by someone else.
+
+        One thing outranks this. Article IV §8 gives every domain at least two
+        examiners, and a domain at zero would be sealed shut: regaining the post
+        requires an examination that nobody would be left to open. So the last
+        two in a domain are held, and the deferral is written down rather than
+        passed over in silence.
+        """
+        if tick <= 0:
+            return []
+        store = self.store
+        cutoff = tick - EXAMINER_LAPSE_TICKS
+        if cutoff < 0:
+            return []
+
+        # Count the bench in each domain first: whether a post lapses depends on
+        # how many others hold it, not only on its own neglect.
+        holders: dict[str, list[str]] = {}
+        for agent in store.agents():
+            for domain in agent["examiner_domains"]:
+                holders.setdefault(domain, []).append(agent["id"])
+
+        appended = []
+        for agent in store.agents():
+            for domain in sorted(agent["examiner_domains"]):
+                last = store.last_academy_touch(agent["id"], domain)
+                if last and last["tick"] > cutoff:
+                    continue
+                if len(holders.get(domain, [])) <= 2:
+                    if store.lapse_deferrals(agent["id"], domain, since_tick=cutoff):
+                        continue          # already said so this window
+                    appended.append(store.append("forge", "lapse_deferred", {
+                        "agent_id": agent["id"], "domain": domain,
+                        "holders": len(holders.get(domain, [])),
+                        "reason": ("Article IV §8: every domain shall have at least "
+                                   "two examiners. This post is unused but held, "
+                                   "because losing it would leave the domain unable "
+                                   "to examine anyone back into it."),
+                    }, tick))
+                    continue
+                appended.append(store.append("forge", "examiner_lapsed", {
+                    "agent_id": agent["id"], "domain": domain,
+                    "last_touch_tick": last["tick"] if last else None,
+                    "last_touch_event": last["id"] if last else None,
+                    "window": EXAMINER_LAPSE_TICKS,
+                    "reason": (f"Article IV: examinership is held on condition of "
+                               f"use. No sitting and no marking in {domain} for "
+                               f"{EXAMINER_LAPSE_TICKS} ticks. The declaration to "
+                               f"stand for it survives; the post does not."),
+                }, tick))
+                holders[domain].remove(agent["id"])
+        return appended
 
     def execute(self, prop: dict, tick: int) -> list[dict]:
         """Automatic effect of a passed proposal (Article VI §3)."""
@@ -214,7 +343,6 @@ class Engine:
         sandboxed subprocess and returns real measurements. The agent then reports
         whatever came back — including a failure, which is a result too.
         """
-        import os
         # A nested Forge — one built by a protocol to generate a ledger to replay —
         # must not run protocols of its own, or the recursion is unbounded.
         if os.environ.get("FORGE_NO_PROTOCOLS"):
@@ -253,6 +381,7 @@ class Engine:
             "assessment_to_answer": None,
             "assessments_to_grade": [],
             "candidates_needing_exam": [],
+            "resits_available": [],
             "candidates_ready_for_admission": [],
             "examiner_candidates": [],
             # Article IX as amended: only suggestions the administrator approved
@@ -327,8 +456,14 @@ class Engine:
 
             # Agents who have demonstrated 75+ in a domain they may not yet
             # examine (Article IV §4), and whose appointment isn't already moved.
+            #
+            # Only *open* proposals block a fresh motion. An appointment that
+            # passed and then lapsed must be movable again, or Article IV §10's
+            # promise that a post can be re-earned would be empty: the agent
+            # would sit the paper, pass it, and wait for a motion nobody could
+            # raise.
             moved = {(p["params"].get("agent_id"), d) for p in store.proposals()
-                     if p["kind"] == "appoint_examiner" and p["status"] in ("open", "passed")
+                     if p["kind"] == "appoint_examiner" and p["status"] == "open"
                      for d in p["params"].get("domains", [])}
             for other in store.agents():
                 if other["standing"] == "candidate":
@@ -339,12 +474,47 @@ class Engine:
                         ctx["examiner_candidates"].append(
                             {"agent": other, "domain": domain, "score": score})
 
-        if agent["standing"] == "candidate":
-            open_mine = store.assessments(candidate_id=aid, status="open")
-            ctx["assessment_to_answer"] = open_mine[0] if open_mine else None
+        # A paper on the desk is sat by whoever it was set for. Candidates are
+        # the usual case, but a member re-sitting a domain it lost to lapse has
+        # one too, and nobody else can answer it for them.
+        open_mine = store.assessments(candidate_id=aid, status="open")
+        ctx["assessment_to_answer"] = open_mine[0] if open_mine else None
 
         if agent["standing"] == "examiner":
             ctx["assessments_to_grade"] = store.assessments(examiner_id=aid, status="answered")
+            # Agents who lost a post to lapse and may sit their way back onto it.
+            # This is the recovery route Article IV §10 promises, and it is the
+            # reason the difficulty bands ever come into play: a lapsed agent
+            # already has a record, so the paper it re-sits is harder than the
+            # one it originally passed.
+            for lapse in store.examiner_lapses():
+                who, domain = lapse["payload"]["agent_id"], lapse["payload"]["domain"]
+                other = store.agent(who)
+                if other is None or who == aid:
+                    continue
+                if domain in other["examiner_domains"]:
+                    continue              # already back on the bench
+                if domain not in agent["examiner_domains"]:
+                    continue              # this examiner cannot set that paper
+                sat = store.assessments(candidate_id=who)
+                if [a for a in sat if a["status"] in ("open", "answered")]:
+                    continue
+                # The old passing score is still on the record — it is why they
+                # held the post at all — so it cannot be what decides this. Only
+                # a pass recorded *after* the lapse means they are waiting on
+                # the Chamber rather than on another paper.
+                since = [row for row in store.capability_history(who)
+                         if row["domain"] == domain
+                         and row["event_id"] > lapse["id"] and row["score"] >= 75]
+                if since:
+                    continue
+                from .exams import prior_item_ids
+                ctx["resits_available"].append({
+                    "agent": other, "domain": domain,
+                    "last_score": store.capabilities_current(who).get(domain),
+                    "seen_item_ids": sorted(prior_item_ids(sat)),
+                    "sittings": sum(1 for a in sat if a["domain"] == domain),
+                })
             # Candidates with no exam in progress and battery not yet complete.
             from .exams import prior_item_ids
             for cand in store.agents(standing="candidate"):
@@ -361,6 +531,9 @@ class Engine:
                 ctx["candidates_needing_exam"].append({
                     "agent": cand,
                     "domains_passed": sorted(examined),
+                    # What this candidate last scored in each domain, which is
+                    # what sets the difficulty of the next paper.
+                    "last_scores": store.capabilities_current(cand["id"]),
                     # Every item this candidate has ever been set, so a re-sit
                     # is generated from fresh questions (Article IV as amended).
                     "seen_item_ids": sorted(prior_item_ids(sat)),

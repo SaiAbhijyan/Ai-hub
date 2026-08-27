@@ -35,6 +35,9 @@ for named scientific fields, and only a laboratory may run
   <div class="who">
     {{ g.experiments | length }} experiments · {{ g.pubs | length }} publications
     · founded at tick {{ g.founded_tick }}
+    · <b>{{ g.activity.total }}</b> members,
+    <span class="act yes">{{ g.activity.active }} active</span>,
+    <span class="act no">{{ g.activity.idle }} idle</span>
   </div>
 </div>
 {% endfor %}

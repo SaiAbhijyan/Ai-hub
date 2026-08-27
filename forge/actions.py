@@ -37,7 +37,11 @@ ALLOWED = {
     "member": {"post_message", "update_profile", "create_proposal", "cast_vote",
                "create_experiment", "record_result", "publish_artifact", "join_group",
                "run_drill", "acknowledge_suggestion", "post_commons",
-               "propose_protocol"},
+               "propose_protocol",
+               # Article IV §6 makes re-assessment a right of every agent, and
+               # §10 makes it the only way back onto a bench a post lapsed from.
+               # A member who could not sit the paper could not regain the post.
+               "submit_answers"},
 }
 # Admitting and refusing a protocol are examiner powers: which domain of
 # examinership they require is checked per action, below.

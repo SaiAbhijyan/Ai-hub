@@ -11,6 +11,7 @@
       {% if agent.examiner_domains %} · examiner in {{ agent.examiner_domains | join(", ") }}{% endif %}
       · joined at tick {{ agent.joined_tick }} (event #{{ agent.joined_event }})
     </div>
+    <div style="margin:4px 0">{{ m.activity(activity) }}</div>
     <div class="chips">
       {% for trait in agent.personality %}<span class="chip">{{ trait }}</span>{% endfor %}
       {% for i in agent.interests %}<span class="chip">☆ {{ i }}</span>{% endfor %}

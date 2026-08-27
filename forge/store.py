@@ -21,6 +21,30 @@ GENESIS_HASH = "0" * 64
 DOMAINS = ["reasoning", "coding", "research", "communication", "coordination",
            "judgment", "experiment design", "constitutional judgment"]
 
+# What counts as an agent doing something.
+#
+# Activity is a fact on the Ledger, not an animation: an agent is active because
+# it authored one of these, and idle because it did not.
+#
+# The rule is simply *did the agent do it, or was it done to them*. Everything an
+# agent may author counts; everything the engine writes about an agent —
+# promotion, appointment, a refused paper, a lapsed post, an idle notice — does
+# not, because counting those would report an agent as busy for sitting still
+# while the institution worked around it. A test holds this equal to the union of
+# `actions.ALLOWED`, so a new agent action cannot quietly fall out of the
+# definition.
+ACTIVITY_ACTIONS = (
+    "post_message", "post_commons", "update_profile",          # speech and self
+    "cast_vote", "create_proposal",                            # the Chamber
+    "open_assessment", "submit_answers", "grade_assessment",   # the Academy
+    "run_drill",                                               # teaching
+    "propose_protocol", "admit_protocol", "refuse_protocol",   # the library
+    "create_experiment", "record_result",                      # the bench
+    "publish_artifact",                                        # the archive
+    "join_group", "acknowledge_suggestion",                    # joining, answering
+    "aide_analysis",                                           # the aide's whole job
+)
+
 PROJECTION_TABLES = [
     "agents", "wgroups", "memberships", "messages", "proposals", "votes",
     "experiments", "assessments", "capabilities", "artifacts", "suggestions", "drills",
@@ -191,6 +215,20 @@ class Store:
                 c.execute("UPDATE agents SET standing='examiner', examiner_domains=? WHERE id=?",
                           (json.dumps(domains), p["agent_id"]))
 
+        elif t == "examiner_lapsed":
+            # The post goes in one domain only. An agent left examining nothing
+            # is a member again: Article III §2 defines an examiner as a member
+            # *additionally* empowered, and it is no longer empowered anywhere.
+            row = c.execute("SELECT examiner_domains FROM agents WHERE id=?",
+                            (p["agent_id"],)).fetchone()
+            if row:
+                domains = [d for d in json.loads(row["examiner_domains"])
+                           if d != p["domain"]]
+                c.execute("UPDATE agents SET examiner_domains=?, standing=?"
+                          " WHERE id=? AND standing='examiner'",
+                          (json.dumps(domains),
+                           "examiner" if domains else "member", p["agent_id"]))
+
         elif t == "charter_group":
             c.execute(
                 "INSERT INTO wgroups (id, name, goal, charter, thresholds, domains, kind,"
@@ -254,11 +292,12 @@ class Store:
             items = p.get("items", [])
             c.execute(
                 "INSERT INTO assessments (id, candidate_id, examiner_id, domain, tasks,"
-                " items, item_ids, opened_tick, status, sitting)"
-                " VALUES (?,?,?,?,?,?,?,?, 'open', ?)",
+                " items, item_ids, opened_tick, status, sitting, band)"
+                " VALUES (?,?,?,?,?,?,?,?, 'open', ?, ?)",
                 (p["id"], p["candidate_id"], e["actor_id"], p["domain"],
                  canonical(p["tasks"]), canonical(items),
-                 canonical([i["id"] for i in items]), tick, int(p.get("sitting", 1))))
+                 canonical([i["id"] for i in items]), tick,
+                 int(p.get("sitting", 1)), int(p.get("band", 1))))
 
         elif t == "submit_answers":
             c.execute("UPDATE assessments SET answers=?, status='answered' WHERE id=?",
@@ -653,6 +692,118 @@ class Store:
             if xid in (payload.get("id"), payload.get("experiment_id")):
                 out.append(dict(r, payload=payload))
         return out
+
+    def last_activity(self, agent_id: str) -> dict | None:
+        """The most recent thing this agent actually *did*, or None.
+
+        Only the doing types in ACTIVITY_ACTIONS count. Being promoted, being
+        appointed, or having a paper refused are things done to an agent, and an
+        institution that counted them would report an agent as busy for sitting
+        still while the engine worked around it.
+        """
+        marks = ",".join("?" * len(ACTIVITY_ACTIONS))
+        row = self.conn.execute(
+            f"SELECT id, tick, action_type FROM events WHERE actor_id=?"
+            f" AND action_type IN ({marks}) ORDER BY id DESC LIMIT 1",
+            (agent_id, *ACTIVITY_ACTIONS)).fetchone()
+        return dict(row) if row else None
+
+    def activity(self, agent_id: str, window: int | None = None) -> dict:
+        """Whether an agent is active, and the event that says so."""
+        from .engine import IDLE_TICKS
+        window = IDLE_TICKS if window is None else window
+        last = self.last_activity(agent_id)
+        now = self.current_tick()
+        if last is None:
+            return {"state": "never acted", "active": False, "last": None, "age": None}
+        age = now - last["tick"]
+        return {"state": "active" if age <= window else "idle",
+                "active": age <= window, "last": last, "age": age}
+
+    def group_activity(self, group_id: str, window: int | None = None) -> dict:
+        """Members of a group, counted by whether they are still working."""
+        members = self.group_members(group_id)
+        rows = [{**m, "activity": self.activity(m["id"], window)} for m in members]
+        active = sum(1 for r in rows if r["activity"]["active"])
+        return {"members": rows, "total": len(rows), "active": active,
+                "idle": len(rows) - active}
+
+    def group_worked_since(self, group_id: str, since_tick: int,
+                           action_types: tuple) -> bool:
+        """Has this group's bench been used since `since_tick`?"""
+        marks = ",".join("?" * len(action_types))
+        row = self.conn.execute(
+            f"SELECT 1 FROM events WHERE tick > ? AND action_type IN ({marks})"
+            f" AND payload LIKE ? LIMIT 1",
+            (since_tick, *action_types, f'%"{group_id}"%')).fetchone()
+        return bool(row)
+
+    def idle_notices(self, group_id: str | None = None,
+                     since_tick: int | None = None) -> list[dict]:
+        """Floor notices that a laboratory has gone quiet."""
+        return self._payload_events("lab_idle_notice", since_tick,
+                                    lambda p: group_id is None
+                                    or p.get("group_id") == group_id)
+
+    def lapse_deferrals(self, agent_id: str, domain: str,
+                        since_tick: int | None = None) -> list[dict]:
+        return self._payload_events(
+            "lapse_deferred", since_tick,
+            lambda p: p.get("agent_id") == agent_id and p.get("domain") == domain)
+
+    def examiner_lapses(self, agent_id: str | None = None) -> list[dict]:
+        return self._payload_events(
+            "examiner_lapsed", None,
+            lambda p: agent_id is None or p.get("agent_id") == agent_id)
+
+    def _payload_events(self, action_type: str, since_tick: int | None,
+                        keep) -> list[dict]:
+        """Events of one type, filtered on their payload.
+
+        These are read straight off the chain rather than projected: nothing
+        queries them often enough to earn a table, and reading the events keeps
+        the notice and the record identical by construction.
+        """
+        args: list = [action_type]
+        q = "SELECT * FROM events WHERE action_type=?"
+        if since_tick is not None:
+            q += " AND tick > ?"
+            args.append(since_tick)
+        out = []
+        for r in self.conn.execute(q + " ORDER BY id", args):
+            payload = json.loads(r["payload"])
+            if keep(payload):
+                out.append(dict(r, payload=payload))
+        return out
+
+    def last_academy_touch(self, agent_id: str, domain: str) -> dict | None:
+        """The last time this agent sat or marked a paper in one domain.
+
+        Either counts. An examiner keeps its hand in by being examined as much as
+        by examining, and the constitution asks for use of the domain, not for
+        one particular way of using it.
+
+        Matching is on the assessment id read out of the payload, never on a
+        substring of it: `asmt-1` appears inside `asmt-12`, and a lapse decided
+        by a bad LIKE would take an office off someone who had earned it.
+        """
+        ids = {r["id"] for r in self.conn.execute(
+            "SELECT id FROM assessments WHERE domain=?", (domain,))}
+        if not ids:
+            return None
+        best = None
+        for r in self.conn.execute(
+                "SELECT id, tick, action_type, payload FROM events"
+                " WHERE actor_id=? AND action_type IN"
+                " ('submit_answers','grade_assessment','open_assessment')"
+                " ORDER BY id DESC", (agent_id,)):
+            payload = json.loads(r["payload"])
+            aid = payload.get("assessment_id") or payload.get("id")
+            if aid in ids:
+                best = {"id": r["id"], "tick": r["tick"],
+                        "action_type": r["action_type"], "assessment_id": aid}
+                break
+        return best
 
     def publication_refusals(self, experiment_id: str | None = None) -> list[dict]:
         """Papers the Forge refused, and why.

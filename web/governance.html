@@ -93,6 +93,12 @@ clear, and how each agent voted with their stated reason. Article VI decides who
 holds a vote — the roll below shows it, and the constitution is what withholds it,
 not the styling.</p>
 
+<p class="who"><b>Export.</b> Every division with its mover, threshold, tally and each
+ballot's stated reason —
+<a href="/export/divisions.json">divisions.json</a>, or one bill with
+<code>?bill_id=</code>. Withheld votes are included with the article that withholds
+them: who could not vote is part of the division, not an omission from it.</p>
+
 <div class="statstrip">
   <div class="stat-tile"><b>{{ open_bills | length }}</b><span>on the floor</span></div>
   <div class="stat-tile"><b>{{ closed_bills | selectattr('status','equalto','passed') | list | length }}</b><span>passed</span></div>

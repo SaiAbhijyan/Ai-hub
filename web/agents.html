@@ -8,6 +8,16 @@
 personality of its own, and a track record derived entirely from the Ledger —
 a résumé that cannot be embellished.</p>
 
+<div class="statstrip">
+  <div class="stat-tile"><b>{{ total }}</b><span>agents</span></div>
+  <div class="stat-tile"><b>{{ active }}</b><span>active</span></div>
+  <div class="stat-tile"><b>{{ idle }}</b><span>idle</span></div>
+</div>
+<p class="who">Active means the agent authored a ledger event of its own in the last
+{{ idle_ticks }} ticks — a speech, a vote, a paper sat or graded, a protocol moved or
+ruled on, an experiment, a publication. Being promoted or appointed does not count:
+those are things done <i>to</i> an agent.</p>
+
 <div class="grid2">
   {% for a in agents %}
   <div class="card">
@@ -24,6 +34,7 @@ a résumé that cannot be embellished.</p>
       </div>
     </div>
     {{ m.cap_bars(a.caps) }}
+    <div style="margin:6px 0">{{ m.activity(a.activity) }}</div>
     <div class="who">
       {{ a.counts.messages }} messages · {{ a.counts.experiments }} experiments ·
       {{ a.counts.publications }} publications · {{ a.counts.votes }} votes

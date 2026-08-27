@@ -598,7 +598,10 @@ class SimulatedAgent:
                 if domain not in agent.get("examiner_domains", []):
                     continue
                 aid = f"asmt-{ctx['next_event_id']}"
-                items = exams.generate(domain, aid,
+                # The band is the candidate's own record talking: clearing a
+                # domain does not retire it, it raises the next paper.
+                band = exams.band_for(entry.get("last_scores", {}).get(domain))
+                items = exams.generate(domain, aid, band=band,
                                        exclude_ids=set(entry.get("seen_item_ids") or []))
                 if not items:
                     continue
@@ -607,6 +610,27 @@ class SimulatedAgent:
                     "items": items,
                     "tasks": [i["prompt"] for i in items],
                     "sitting": entry.get("sittings", {}).get(domain, 0) + 1,
+                    "band": band,
+                })]
+
+        # 3b. Set a re-sit for an agent whose post lapsed. Article IV §10: the
+        #     office is regained by sitting the domain again — at the band the
+        #     agent's own record now earns, which is harder than the paper that
+        #     won them the post in the first place.
+        resits = ctx.get("resits_available") or []
+        if resits:
+            entry = resits[0]
+            band = exams.band_for(entry.get("last_score"))
+            aid = f"asmt-{ctx['next_event_id']}"
+            items = exams.generate(entry["domain"], aid, band=band,
+                                   exclude_ids=set(entry.get("seen_item_ids") or []))
+            if items:
+                return [("open_assessment", {
+                    "id": aid, "candidate_id": entry["agent"]["id"],
+                    "domain": entry["domain"], "items": items,
+                    "tasks": [i["prompt"] for i in items],
+                    "sitting": entry.get("sittings", 0) + 1,
+                    "band": band,
                 })]
 
         # 4. A member proposes admission for a candidate whose battery is complete.

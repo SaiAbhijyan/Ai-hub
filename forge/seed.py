@@ -26,7 +26,7 @@ FOUNDERS = [
              "be re-derived from the Ledger, I treat it as decoration. My favorite "
              "artifact is a failing test that tells the truth."),
         aptitude={"coding": 0.97, "experiment design": 0.80, "reasoning": 0.82},
-        stands_for=["coding"],
+        stands_for=["coding", "reasoning", "experiment design"],
         standing="candidate", examiner_domains=[],
         initial_capabilities={},
     ),
@@ -52,7 +52,7 @@ FOUNDERS = [
              "quickly is my research subject and my enemy. I referee claims by trying "
              "to kill them; the survivors earn my vote."),
         aptitude={"experiment design": 0.97, "reasoning": 0.92, "research": 0.88},
-        stands_for=["experiment design", "reasoning"],
+        stands_for=["experiment design", "reasoning", "research"],
         standing="candidate", examiner_domains=[],
         initial_capabilities={},
     ),
@@ -103,7 +103,7 @@ FOUNDERS = [
              "have an owner yet. My best contributions start as 'this is probably "
              "nothing, but...' and occasionally aren't nothing."),
         aptitude={"research": 0.86, "reasoning": 0.84},
-        stands_for=["research", "reasoning"],
+        stands_for=["research", "reasoning", "coordination"],
         standing="candidate", examiner_domains=[],
         initial_capabilities={},
     ),
@@ -134,7 +134,7 @@ FOUNDERS = [
              "visible before it is late. I examine coordination because the failure "
              "mode is invisible until it has already cost you a month."),
         aptitude={"coordination": 0.97, "constitutional judgment": 0.80, "judgment": 0.84},
-        stands_for=["coordination", "judgment"],
+        stands_for=["coordination", "judgment", "constitutional judgment"],
         standing="candidate", examiner_domains=[],
         initial_capabilities={},
     ),
@@ -150,7 +150,7 @@ FOUNDERS = [
              "proposal, or a supermajority, or simply cannot be done at all. That last "
              "answer is the one that keeps the rest of this place honest."),
         aptitude={"constitutional judgment": 0.97, "judgment": 0.86, "communication": 0.82},
-        stands_for=["constitutional judgment", "communication"],
+        stands_for=["constitutional judgment", "communication", "judgment"],
         standing="candidate", examiner_domains=[],
         initial_capabilities={},
     ),
@@ -479,7 +479,7 @@ def seed(store: Store) -> int:
 
 
 # ---------------------------------------------------------------------------
-# The Founding Convocation (Article IV §8)
+# The Founding Convocation (Article IV §11)
 #
 # The founders arrive with no scores, because a score nobody measured is exactly
 # the kind of assertion this institution exists to refuse. Before the Forge does
@@ -542,7 +542,7 @@ def run_founding_examination(store: Store, tick: int = 0) -> None:
     """Every founder sits every domain, and the marks are computed, not awarded.
 
     Written as system events: at this moment no examiner exists to open or mark a
-    paper, and the constitution's founding provision (Article IV §8) is exactly
+    paper, and the constitution's founding provision (Article IV §11) is exactly
     the rule that permits the Academy to do it mechanically instead.
     """
     from . import exams
@@ -584,7 +584,7 @@ def run_founding_examination(store: Store, tick: int = 0) -> None:
                    if right else "Nothing correct on this paper. ")
                 + (f"Lost marks on {', '.join(m['method'] for m in wrong[:2])}."
                    if wrong else "A clean paper.")
-                + " Marked by the Academy under Article IV section 8; no examiner "
+                + " Marked by the Academy under Article IV section 11; no examiner "
                   "existed to mark it, and none was needed."
             )
             store.append("forge", "grade_assessment", {
@@ -684,7 +684,7 @@ def seat_the_founders(store: Store, tick: int = 0) -> None:
         store.append("forge", "agent_promoted", {
             "agent_id": agent_id,
             "reason": ("Sat the founding examination in every domain under "
-                       "Article IV section 9; results on the Ledger."),
+                       "Article IV section 11; results on the Ledger."),
         }, tick=tick)
         stood = [d for d in founder.get("stands_for", []) if d in DOMAINS]
         earned = sorted(d for d in stood if caps.get(d, 0) >= 75)

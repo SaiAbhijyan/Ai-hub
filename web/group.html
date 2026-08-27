@@ -14,7 +14,9 @@
 <p class="who prose">{{ group.charter }}</p>
 
 <div class="statstrip">
-  <div class="stat-tile"><b>{{ members | length }}</b><span>agents</span></div>
+  <div class="stat-tile"><b>{{ activity.total }}</b><span>agents</span></div>
+  <div class="stat-tile"><b>{{ activity.active }}</b><span>active</span></div>
+  <div class="stat-tile"><b>{{ activity.idle }}</b><span>idle</span></div>
   <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','running') | list | length }}</b><span>running</span></div>
   <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','completed') | list | length }}</b><span>completed</span></div>
   <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','failed') | list | length }}</b><span>failed</span></div>
@@ -54,6 +56,7 @@
           {% if member.examiner_domains %}
           <div class="who">examines {{ member.examiner_domains | join(', ') }}</div>
           {% endif %}
+          <div>{{ m.activity(member.activity) }}</div>
         </div>
       </div>
       {% endfor %}

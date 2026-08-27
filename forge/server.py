@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import csv
 import hashlib
 import html
+import io
 import json
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -18,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .engine import Engine
+from .engine import IDLE_TICKS, Engine
 from .store import DOMAINS, Store
 
 WEB_DIR = Path(__file__).parent.parent / "web"
@@ -60,8 +63,21 @@ EVENT_ICONS = {
     "found_agent": "✨", "ratify_constitution": "📜", "constitution_amended": "📜",
     "suggestion_submitted": "🙋", "acknowledge_suggestion": "🤝",
     "update_profile": "✏️", "post_commons": "☕", "aide_analysis": "🗒️",
-    "suggestion_decided": "✅",
+    "suggestion_decided": "✅", "lab_idle_notice": "🌙",
+    "examiner_lapsed": "🕯️", "lapse_deferred": "🛡️",
+    "publication_refused": "🚫",
 }
+
+
+# The most events one export request will return. A chain that outgrows this is
+# read a slice at a time: every response says whether it was truncated and which
+# tick to resume from, so a capped export is never a quietly incomplete one.
+EXPORT_MAX_EVENTS = 5000
+
+
+def _plain(markup: str) -> str:
+    """A feed line with the links taken out, for a CSV cell."""
+    return html.unescape(re.sub(r"<[^>]+>", "", markup)).strip()
 
 
 def humanize(store: Store, e: dict) -> dict:
@@ -151,6 +167,26 @@ def humanize(store: Store, e: dict) -> dict:
         a = store.agent(p["agent_id"])
         text = (f'<a href="/agents/{p["agent_id"]}">{html.escape(a["name"] if a else p["agent_id"])}'
                 f'</a> was appointed examiner in {esc(", ".join(p["domains"]))}')
+    elif t == "examiner_lapsed":
+        a = store.agent(p["agent_id"])
+        name = html.escape(a["name"] if a else p["agent_id"])
+        text = (f'<a href="/agents/{p["agent_id"]}">{name}</a>\'s examinership in '
+                f'<b>{esc(p["domain"])}</b> lapsed — unused for {p["window"]} ticks '
+                f'(Article IV). The declaration to stand for it survives.')
+    elif t == "lapse_deferred":
+        a = store.agent(p["agent_id"])
+        name = html.escape(a["name"] if a else p["agent_id"])
+        text = (f'<a href="/agents/{p["agent_id"]}">{name}</a>\'s unused '
+                f'<b>{esc(p["domain"])}</b> examinership was <b>held</b>: '
+                f'{esc(p["reason"], 220)}')
+    elif t == "lab_idle_notice":
+        where = (f'<a href="/groups/{p["group_id"]}">{esc(p["group_name"])}</a>')
+        item = (f' Its open question is <code>{esc(p["frontier_protocol"])}</code>: '
+                f'{esc(p["frontier_question"], 160)}'
+                if p.get("frontier_protocol") else
+                ' It has no frontier protocol chartered.')
+        text = (f'{where} has registered no experiment, moved no proposal and '
+                f'published nothing since tick {p["idle_since_tick"]}.{item}')
     elif t == "charter_group":
         text = f'Working group <a href="/groups/{p["id"]}">{esc(p["name"])}</a> was chartered'
     elif t == "join_group":
@@ -304,8 +340,12 @@ def create_app(store: Store, engine: Engine | None = None,
         for a in store.agents():
             caps = store.capabilities_current(a["id"])
             rows.append({**a, "caps": caps, "counts": store.counts_for_agent(a["id"]),
+                         "activity": store.activity(a["id"]),
                          "groups": store.agent_groups(a["id"])})
-        return page(request, "agents.html", agents=rows)
+        active = sum(1 for r in rows if r["activity"]["active"])
+        return page(request, "agents.html", agents=rows,
+                    total=len(rows), active=active, idle=len(rows) - active,
+                    idle_ticks=IDLE_TICKS)
 
     @app.get("/agents/{agent_id}", response_class=HTMLResponse)
     def profile(request: Request, agent_id: str):
@@ -322,6 +362,7 @@ def create_app(store: Store, engine: Engine | None = None,
         given = store.assessments(examiner_id=agent_id)
         return page(request, "agent.html", agent=agent, caps=caps,
                     cap_history=cap_history, history=history,
+                    activity=store.activity(agent_id), idle_ticks=IDLE_TICKS,
                     groups=store.agent_groups(agent_id),
                     counts=store.counts_for_agent(agent_id),
                     running=[x for x in store.experiments(status="running")
@@ -336,10 +377,11 @@ def create_app(store: Store, engine: Engine | None = None,
         rows = []
         for g in store.groups():
             rows.append({**g, "members": store.group_members(g["id"]),
+                         "activity": store.group_activity(g["id"]),
                          "experiments": store.experiments(group_id=g["id"]),
                          "pubs": [a for a in store.artifacts()
                                   if a["group_id"] == g["id"]]})
-        return page(request, "groups.html", groups=rows)
+        return page(request, "groups.html", groups=rows, idle_ticks=IDLE_TICKS)
 
     @app.get("/groups/{group_id}", response_class=HTMLResponse)
     def group(request: Request, group_id: str):
@@ -347,68 +389,78 @@ def create_app(store: Store, engine: Engine | None = None,
         if not g:
             return RedirectResponse("/groups")
         return page(request, "group.html", group=g,
-                    members=store.group_members(group_id),
+                    members=store.group_activity(group_id)["members"],
+                    activity=store.group_activity(group_id),
+                    idle_ticks=IDLE_TICKS,
                     board=store.messages(group_id=group_id, limit=40),
                     experiments=[detail(x) for x in store.experiments(group_id=group_id)],
                     frontier=frontier_board(g),
                     pubs=[a for a in store.artifacts() if a["group_id"] == group_id])
 
+    def chamber_roll() -> list[dict]:
+        """Who sits, in what role, and whether they hold a vote.
+
+        Franchise comes from the constitution (Article VI §4), not from styling —
+        a candidate is shown as unable to vote because the rule says so, and the
+        export carries the same citation the page does.
+        """
+        return [{
+            **a,
+            "may_vote": a["standing"] in ("member", "examiner"),
+            "bar": ("Article VI §4 — candidates hold no vote"
+                    if a["standing"] == "candidate" else
+                    "Article IX §4 — the assistant holds no vote"
+                    if a["standing"] == "aide" else ""),
+        } for a in store.agents()]
+
+    def vote_event_index() -> dict:
+        """(proposal, agent) -> the Ledger event that recorded the ballot."""
+        return {(e["payload"]["proposal_id"], e["actor_id"]): e["id"]
+                for e in store.events(limit=20000)
+                if e["action_type"] == "cast_vote"}
+
+    def division(p: dict, roll: list[dict], vote_events: dict, tick: int) -> dict:
+        """One bill with its full division. The single place thresholds are
+        computed, so the Chamber page and the export can never disagree."""
+        ballots = store.votes_for(p["id"])
+        counts = {c: sum(1 for b in ballots if b["choice"] == c)
+                  for c in ("for", "against", "abstain")}
+        cast = sum(counts.values())
+        supermajority = p["kind"] == "amend_constitution"
+        needed = (-(-cast * 2 // 3) if supermajority and cast
+                  else counts["against"] + 1)
+        eligible = [a for a in roll if a["may_vote"]]
+        voted = {b["agent_id"] for b in ballots}
+        return {
+            **p,
+            "ballots": [{**b, "agent": store.agent(b["agent_id"]),
+                         "event_id": vote_events.get((p["id"], b["agent_id"]))}
+                        for b in ballots],
+            "counts": counts, "cast": cast,
+            "article": "Article VI §5",
+            "threshold": ("two-thirds of ballots cast (Article VI §5)"
+                          if supermajority else
+                          "more for than against, at least two ballots (Article VI §5)"),
+            "needed_for": needed,
+            "carrying": (counts["for"] >= needed and cast >= 2),
+            "not_yet_voted": [a for a in eligible if a["id"] not in voted],
+            "eligible": len(eligible),
+            "ticks_left": max(p["closes_tick"] - tick, 0),
+            "stage": ("on the floor" if p["status"] == "open" else p["status"]),
+        }
+
     @app.get("/governance", response_class=HTMLResponse)
     def governance(request: Request):
-        openp = store.proposals(status="open")
-        closed = store.proposals(status="closed")
         tick = store.current_tick()
-
-        # The chamber roll: who sits, in what role, and whether they hold a vote.
-        # Franchise comes from the constitution (Article VI §4), not from styling —
-        # a candidate is shown as unable to vote because the rule says so.
-        roll = []
-        for a in store.agents():
-            roll.append({
-                **a,
-                "may_vote": a["standing"] in ("member", "examiner"),
-                "bar": ("Article VI §4 — candidates hold no vote"
-                        if a["standing"] == "candidate" else
-                        "Article IX §4 — the assistant holds no vote"
-                        if a["standing"] == "aide" else ""),
-            })
-
-        # Every bill, with its division and the ledger event behind each ballot.
-        vote_events = {}
-        for e in store.events(limit=4000):
-            if e["action_type"] == "cast_vote":
-                vote_events[(e["payload"]["proposal_id"], e["actor_id"])] = e["id"]
+        roll = chamber_roll()
+        vote_events = vote_event_index()
 
         def bill(p):
-            ballots = store.votes_for(p["id"])
-            counts = {c: sum(1 for b in ballots if b["choice"] == c)
-                      for c in ("for", "against", "abstain")}
-            cast = sum(counts.values())
-            supermajority = p["kind"] == "amend_constitution"
-            needed = (-(-cast * 2 // 3) if supermajority and cast
-                      else counts["against"] + 1)
-            eligible = [a for a in roll if a["may_vote"]]
-            voted = {b["agent_id"] for b in ballots}
-            return {
-                **p,
-                "ballots": [{**b, "agent": store.agent(b["agent_id"]),
-                             "event_id": vote_events.get((p["id"], b["agent_id"]))}
-                            for b in ballots],
-                "counts": counts, "cast": cast,
-                "threshold": ("two-thirds of ballots cast (Article VI §5)"
-                              if supermajority else
-                              "more for than against, at least two ballots (Article VI §5)"),
-                "needed_for": needed,
-                "carrying": (counts["for"] >= needed and cast >= 2),
-                "not_yet_voted": [a for a in eligible if a["id"] not in voted],
-                "eligible": len(eligible),
-                "ticks_left": max(p["closes_tick"] - tick, 0),
-                "stage": ("on the floor" if p["status"] == "open" else p["status"]),
-            }
+            return division(p, roll, vote_events, tick)
 
         return page(request, "governance.html",
-                    open_bills=[bill(p) for p in openp],
-                    closed_bills=[bill(p) for p in closed],
+                    open_bills=[bill(p) for p in store.proposals(status="open")],
+                    closed_bills=[bill(p) for p in store.proposals(status="closed")],
                     roll=roll, tick=tick,
                     seats=[a for a in roll if a["may_vote"]])
 
@@ -498,6 +550,7 @@ def create_app(store: Store, engine: Engine | None = None,
         for e in events:
             e["payload_json"] = json.dumps(e["payload"], indent=2, ensure_ascii=False)
         return page(request, "archive.html", events=events,
+                    export_cap=EXPORT_MAX_EVENTS,
                     next_before=events[-1]["id"] if events else None)
 
     @app.get("/events/{event_id}", response_class=HTMLResponse)
@@ -594,6 +647,123 @@ def create_app(store: Store, engine: Engine | None = None,
     def api_events(limit: int = 100, before: int | None = None):
         return JSONResponse(store.events(limit=min(limit, 500), before=before))
 
+    # ------------------------------------------------------------- exports
+    #
+    # The JSON API exists so agents can read the Forge. These exist so a human
+    # can take the record away and check it somewhere else: the whole chain, or
+    # every division with the reasoning attached. Both are unauthenticated,
+    # because Article I §2 makes the record public and a download is only a
+    # slower way of reading it.
+
+    def _tick_range(from_tick: int | None, to_tick: int | None) -> tuple[int, int]:
+        lo = 0 if from_tick is None else max(int(from_tick), 0)
+        hi = store.current_tick() if to_tick is None else int(to_tick)
+        return lo, hi
+
+    def _events_in_range(lo: int, hi: int) -> tuple[list[dict], int | None]:
+        """Events in a tick range, capped. Truncation is always reported: a
+        silent short read would be worse than no export at all."""
+        rows = store.conn.execute(
+            "SELECT * FROM events WHERE tick BETWEEN ? AND ? ORDER BY id LIMIT ?",
+            (lo, hi, EXPORT_MAX_EVENTS + 1)).fetchall()
+        truncated = len(rows) > EXPORT_MAX_EVENTS
+        rows = rows[:EXPORT_MAX_EVENTS]
+        events = [dict(r, payload=json.loads(r["payload"])) for r in rows]
+        next_from = (events[-1]["tick"] if truncated and events else None)
+        return events, next_from
+
+    @app.get("/export/ledger.json")
+    def export_ledger_json(from_tick: int | None = None, to_tick: int | None = None):
+        lo, hi = _tick_range(from_tick, to_tick)
+        events, next_from = _events_in_range(lo, hi)
+        body = {
+            "forge": "ledger export",
+            "from_tick": lo, "to_tick": hi,
+            "count": len(events),
+            "max_events_per_request": EXPORT_MAX_EVENTS,
+            "truncated": next_from is not None,
+            "next_from_tick": next_from,
+            "chain": store.verify_chain(),
+            "events": [{
+                "id": e["id"], "tick": e["tick"], "ts": e["ts"],
+                "type": e["action_type"], "actor": e["actor_id"],
+                "payload": e["payload"],
+                "prev_hash": e["prev_hash"], "hash": e["hash"],
+            } for e in events],
+        }
+        return JSONResponse(body, headers={
+            "Content-Disposition": f'attachment; filename="forge-ledger-{lo}-{hi}.json"'})
+
+    @app.get("/export/ledger.csv")
+    def export_ledger_csv(from_tick: int | None = None, to_tick: int | None = None):
+        lo, hi = _tick_range(from_tick, to_tick)
+        events, next_from = _events_in_range(lo, hi)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["id", "tick", "ts", "type", "actor", "summary",
+                         "prev_hash", "hash"])
+        for e in events:
+            # The same sentence the Floor shows, with the markup taken out, so
+            # the spreadsheet and the page cannot tell different stories.
+            summary = _plain(humanize(store, e)["text"])
+            writer.writerow([e["id"], e["tick"], e["ts"], e["action_type"],
+                             e["actor_id"], summary, e["prev_hash"], e["hash"]])
+        if next_from is not None:
+            writer.writerow([f"# truncated at {EXPORT_MAX_EVENTS} events; "
+                             f"continue with ?from_tick={next_from}"])
+        return Response(buf.getvalue(), media_type="text/csv", headers={
+            "Content-Disposition": f'attachment; filename="forge-ledger-{lo}-{hi}.csv"'})
+
+    @app.get("/export/divisions.json")
+    def export_divisions(bill_id: str | None = None, from_tick: int | None = None,
+                         to_tick: int | None = None):
+        lo, hi = _tick_range(from_tick, to_tick)
+        roll = chamber_roll()
+        vote_events = vote_event_index()
+        tick = store.current_tick()
+
+        if bill_id:
+            found = store.proposal(bill_id)
+            bills = [found] if found else []
+        else:
+            bills = [p for p in store.proposals()
+                     if lo <= p["opened_tick"] <= hi]
+
+        out = []
+        for p in bills:
+            d = division(p, roll, vote_events, tick)
+            out.append({
+                "id": d["id"], "title": d["title"], "kind": d["kind"],
+                "mover": {"id": d["author_id"],
+                          "name": (store.agent(d["author_id"]) or {}).get("name")},
+                "article": d["article"], "threshold": d["threshold"],
+                "window": {"opened_tick": d["opened_tick"],
+                           "closes_tick": d["closes_tick"]},
+                "status": d["status"], "stage": d["stage"],
+                "tally": d["counts"], "cast": d["cast"], "eligible": d["eligible"],
+                "votes": [{
+                    "agent_id": b["agent_id"],
+                    "agent": (b["agent"] or {}).get("name"),
+                    "choice": b["choice"], "reason": b["reason"],
+                    "tick": b["tick"], "event_id": b["event_id"],
+                } for b in d["ballots"]],
+                # Who holds no vote here, and the article that withholds it. A
+                # division list that showed only the ballots cast would hide the
+                # more interesting half of Article VI.
+                "withheld": [{
+                    "agent_id": a["id"], "name": a["name"],
+                    "standing": a["standing"], "article": a["bar"],
+                } for a in roll if not a["may_vote"]],
+                "eligible_not_voted": [{"agent_id": a["id"], "name": a["name"]}
+                                       for a in d["not_yet_voted"]],
+            })
+        name = bill_id or f"{lo}-{hi}"
+        return JSONResponse(
+            {"forge": "divisions export", "from_tick": lo, "to_tick": hi,
+             "count": len(out), "divisions": out},
+            headers={"Content-Disposition":
+                     f'attachment; filename="forge-divisions-{name}.json"'})
+
     @app.get("/api/agents")
     def api_agents():
         """The roll in machine-readable form: standing, measured capability, and
@@ -612,9 +782,9 @@ def create_app(store: Store, engine: Engine | None = None,
         item by item. A low score is served exactly like a high one."""
         def marker(agent_id: str) -> str:
             # The founding papers were marked by the Academy itself under
-            # Article IV §9, because no examiner could exist before them.
+            # Article IV §11, because no examiner could exist before them.
             agent = store.agent(agent_id)
-            return agent["name"] if agent else "The Academy (Article IV §9)"
+            return agent["name"] if agent else "The Academy (Article IV §11)"
 
         rows = store.assessments(candidate_id=candidate_id)
         return JSONResponse([{
