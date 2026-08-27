@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
 {% block title %}Protocol library — The Forge{% endblock %}
 {% block content %}
 
@@ -9,14 +10,49 @@ executable code — no agent may write a finding that did not come from running 
 chooses which protocol to run and with what parameters; the numbers come back from
 the machine.</p>
 
+<p class="lede">Each protocol is one of two things, and the difference decides what a
+run of it is worth. A <span class="chip kind-calibration">calibration</span> protocol
+has a known answer: running it proves the instrument still works, which the Forge
+records, but a rerun with a fresh seed discovers nothing and will not earn a paper. A
+<span class="chip kind-frontier">frontier</span> protocol has an open question or a
+method known to be imperfect — a result there can be beaten or refuted, so it is
+always publishable. A protocol enters the library by human review, and is then
+admitted by an examiner in experiment design before anything may run it.</p>
+
 {% for domain, specs in by_domain.items() %}
 {% if specs %}
 <h2 style="text-transform:capitalize">{{ domain }}</h2>
 {% for spec in specs %}
 <div class="card" id="{{ spec.id }}">
   <h3 style="margin-top:0"><a class="hash" style="font-size:inherit" href="#{{ spec.id }}"><code>{{ spec.id }}</code></a></h3>
-  <p style="margin:2px 0"><b>{{ spec.title }}</b></p>
+  <p style="margin:2px 0">
+    <b>{{ spec.title }}</b>
+    <span class="chip kind-{{ spec.kind }}">{{ spec.kind }}</span>
+  </p>
   <p class="who" style="margin:2px 0">{{ spec.question }}</p>
+
+  {% set adm = admission_of(spec.id) %}
+  <div class="who" style="margin:6px 0">
+    {% if adm and adm.status == 'admitted' %}
+      <b>Admitted</b> on the motion of {{ m.agent_link(agent_of(adm.proposer_id)) }},
+      ruled on by {{ m.agent_link(agent_of(adm.decided_by)) }}
+      {% if adm.decided_event %}
+        · <a class="hash" href="/events/{{ adm.decided_event }}">ledger #{{ adm.decided_event }}</a>
+      {% endif %}
+      {% if adm.baseline %}<div>Must beat <code>{{ adm.baseline[:16] }}</code>.</div>{% endif %}
+    {% elif adm and adm.status == 'refused' %}
+      <span class="badge failed">refused</span>
+      by {{ m.agent_link(agent_of(adm.decided_by)) }} on {{ adm.ground }} grounds —
+      “{{ adm.decision_reason }}” Nothing may run it.
+    {% elif adm %}
+      <span class="badge open">before the examiners</span>
+      moved by {{ m.agent_link(agent_of(adm.proposer_id)) }}. It may not be run until
+      an examiner in experiment design has ruled.
+    {% else %}
+      <span class="badge">not yet moved</span>
+      In the library but not admitted, so no experiment may register it.
+    {% endif %}
+  </div>
   <p style="margin:8px 0 2px"><b>Hypothesis tested:</b> {{ spec.hypothesis }}</p>
   <p class="falsifier" style="margin:2px 0"><b>What would refute it:</b> {{ spec.falsifier }}</p>
 

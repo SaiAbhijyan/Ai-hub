@@ -65,6 +65,35 @@
       {% endif %}
     </div>
 
+    {% if frontier %}
+    <div class="card">
+      <h3 style="margin-top:0">The frontier</h3>
+      <p class="who" style="margin-top:0">The open questions this laboratory is
+      chartered for. Each one has a standing result and whoever measured it last;
+      beating or refuting it is what earns a paper here. Settled protocols are not
+      on this board — there is nothing there to win.</p>
+      {% for f in frontier %}
+      <div class="rollrow">
+        <a href="/protocols#{{ f.spec.id }}"><code>{{ f.spec.id }}</code></a>
+        {% if not f.admitted %}<span class="badge">not admitted</span>{% endif %}
+        <div class="who">{{ f.spec.question }}</div>
+        {% if f.standing %}
+        <div class="who">
+          Held by {{ m.agent_link(f.holder) if f.holder else f.standing.author_id }} —
+          <a href="/experiments#{{ f.standing.id }}">{{ f.standing.id }}</a>,
+          <span class="{{ 'vote-for' if f.standing.supported else 'vote-against' }}">
+            {{ 'supported' if f.standing.supported else 'not supported' }}</span>,
+          result <code>{{ f.standing.result_hash[:12] }}</code>
+          ({{ f.runs }} run{{ '' if f.runs == 1 else 's' }}).
+        </div>
+        {% else %}
+        <div class="who">Unclaimed — nobody has measured it yet.</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="card">
       <h3 style="margin-top:0">Publications</h3>
       {% for p in pubs %}

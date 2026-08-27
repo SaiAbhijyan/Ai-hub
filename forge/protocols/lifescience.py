@@ -274,6 +274,7 @@ PROTOCOLS = [
         "falsifier": "One sequence whose measured GC content lies 3 "
                       "standard errors or further from the generating "
                       "probability refutes it.",
+        "kind": "calibration",
         "params": {
             "length": {"type": "int", "min": 5000, "max": 300000, "default": 60000,
                        "doc": "sequence length in base pairs"},
@@ -290,6 +291,7 @@ PROTOCOLS = [
         "falsifier": "A stop-codon z-score of 3.0 or above, or any amino "
                       "acid whose measured frequency is off by 1 percentage "
                       "point or more, refutes it.",
+        "kind": "calibration",
         "params": {
             "genes": {"type": "int", "min": 20, "max": 1000, "default": 200,
                       "doc": "number of synthetic coding sequences"},
@@ -307,6 +309,7 @@ PROTOCOLS = [
         "hypothesis": "The logistic fit achieves lower residual error than the exponential fit.",
         "falsifier": "The logistic fit's sum of squared error coming out "
                       "at or above the exponential fit's refutes it.",
+        "kind": "calibration",
         "params": {
             "carrying_capacity": {"type": "int", "min": 200, "max": 5000, "default": 1000,
                                   "doc": "true carrying capacity of the simulated population"},
@@ -325,6 +328,7 @@ PROTOCOLS = [
         "falsifier": "A self-alignment that is not a perfect full-length "
                       "score, or a score that rises at any higher mutation "
                       "rate, refutes it.",
+        "kind": "calibration",
         "params": {
             "length": {"type": "int", "min": 100, "max": 800, "default": 400,
                        "doc": "sequence length in base pairs"},

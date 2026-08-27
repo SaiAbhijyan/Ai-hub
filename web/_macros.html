@@ -47,6 +47,9 @@
           <span class="badge">{{ x.group.kind }}</span>
         {% endif %}
         {% if x.domain %}<span class="chip">{{ x.domain }}</span>{% endif %}
+        {% if x.protocol_kind %}
+          <span class="chip kind-{{ x.protocol_kind }}">{{ x.protocol_kind }}</span>
+        {% endif %}
       </div>
     </div>
     <span class="stage stage-{{ 'open' if x.status == 'running' else ('passed' if x.status == 'completed' else 'failed') }}">
@@ -111,6 +114,18 @@
     {% for p in x.papers %}<a href="/publications/{{ p.id }}">{{ p.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
   </div>
   {% endif %}
+
+  {% for r in x.refusals %}
+  {# A refused paper stays on the record. An agent that tried to bank credit for
+     a rerun should be visible having tried, and a reader should be able to see
+     why a completed run produced no publication. #}
+  <div class="refused">
+    <b>No paper.</b>
+    {% if r.agent %}{{ agent_link(r.agent) }}{% else %}{{ r.payload.agent_id }}{% endif %}
+    submitted one and the Forge refused it: “{{ r.payload.reason }}”
+    <a class="hash" href="/events/{{ r.id }}">ledger #{{ r.id }}</a>
+  </div>
+  {% endfor %}
 
   {% if x.protocol_id %}
   <div class="hash" style="margin-top:6px">

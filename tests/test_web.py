@@ -350,3 +350,108 @@ def test_academy_and_profiles_show_the_new_domains(client, store):
     assert "constitutional judgment" in profile
     caps = store.capabilities_current(examiner["id"])
     assert str(caps["constitutional judgment"]) in profile
+
+
+# ------------------------------------- calibration, frontier and admission (GUI)
+
+def test_protocol_library_shows_the_tag_and_who_admitted_it(client, store):
+    from forge import protocols
+
+    html = client.get("/protocols").text
+    assert "kind-calibration" in html and "kind-frontier" in html
+    for pid, spec in protocols.REGISTRY.items():
+        assert f'kind-{spec["kind"]}' in html
+    # Admission is not a silent fact: the mover and the bench are both named.
+    assert "Admitted</b> on the motion of" in html
+    for row in store.protocol_admissions(status="admitted"):
+        assert store.agent(row["proposer_id"])["name"] in html
+        assert store.agent(row["decided_by"])["name"] in html
+
+
+def test_the_founding_library_was_admitted_by_two_benches(store):
+    """Article IV §8 again: a single examiner admitting the whole library would
+    make the second experiment-design examiner decoration."""
+    rows = store.protocol_admissions(status="admitted")
+    assert len(rows) >= 21
+    benches = {r["decided_by"] for r in rows}
+    assert len(benches) >= 2, benches
+    assert not [r for r in rows if r["decided_by"] == r["proposer_id"]]
+    for row in rows:
+        assert "experiment design" in store.agent(row["decided_by"])["examiner_domains"]
+
+
+def test_a_laboratory_shows_its_frontier(client, store):
+    from forge import protocols
+
+    group = next(g for g in store.groups()
+                 if any(protocols.by_domain(d) and
+                        any(s["kind"] == "frontier" for s in protocols.by_domain(d))
+                        for d in (g["domains"] or [])))
+    html = client.get(f"/groups/{group['id']}").text
+    assert "The frontier" in html
+    for domain in group["domains"]:
+        for spec in protocols.by_domain(domain):
+            if spec["kind"] == "frontier":
+                assert spec["id"] in html, spec["id"]
+            # A settled protocol has nothing to win and is not on the board.
+    assert "there is nothing there to win" in html
+
+
+def test_experiment_cards_carry_the_protocol_tag(client, store):
+    from forge import protocols
+
+    html = client.get("/experiments").text
+    for x in store.experiments():
+        if x["protocol_id"]:
+            assert f'kind-{protocols.kind_of(x["protocol_id"])}' in html
+
+
+def test_a_refused_paper_is_recorded_and_shown(tmp_path):
+    """A refused publication stays on the Ledger and reaches the reader. Driven
+    through the engine with a runtime that submits a paper it has not earned."""
+    from forge.actions import validate
+    from forge.seed import seed as seed_store
+    from tests.test_research import completed_experiment
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+    exp = completed_experiment(store, xid="exp-earned")
+
+    paper = {"id": "art-earned", "title": "First result", "abstract": "a",
+             "content": "c", "content_hash": "h", "authors": [exp["author_id"]],
+             "kind": "paper", "protocol_id": exp["protocol_id"],
+             "experiment_id": exp["id"], "result_hash": exp["result_hash"],
+             "supported": exp["supported"], "domain": exp["domain"]}
+    assert validate(store, exp["author_id"], "publish_artifact", paper) is None
+    store.append(exp["author_id"], "publish_artifact", paper)
+
+    store.set_tick(store.current_tick() + 60)
+    again = completed_experiment(store, xid="exp-rerun")
+
+    class Chancer:
+        """Submits the rerun as a paper anyway."""
+        def act(self, agent, ctx):
+            if agent["id"] != again["author_id"]:
+                return []
+            return [("publish_artifact", {**paper, "id": "art-rerun",
+                                          "experiment_id": again["id"],
+                                          "result_hash": again["result_hash"]})]
+
+    engine = Engine(store, Chancer())
+    for _ in range(8):
+        engine.tick()
+        if store.publication_refusals():
+            break
+
+    refusals = store.publication_refusals()
+    assert refusals, "the engine dropped the refusal instead of recording it"
+    reason = refusals[0]["payload"]["reason"]
+    assert "calibration protocol" in reason, reason
+    assert store.artifact("art-rerun") is None, "the refused paper must not exist"
+    assert store.verify_chain()["ok"]
+
+    # And a reader of that experiment can see why no paper came out of it.
+    with TestClient(create_app(store, engine=None)) as client:
+        html = client.get("/experiments").text
+    assert "No paper." in html
+    assert "calibration protocol" in html

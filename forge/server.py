@@ -253,11 +253,40 @@ def create_app(store: Store, engine: Engine | None = None,
             "question": spec.get("question", ""),
             "falsifier": spec.get("falsifier", ""),
             "protocol_title": spec.get("title", ""),
+            "protocol_kind": spec.get("kind", ""),
+            "admission": store.protocol_admission(x["protocol_id"]),
+            # Why no paper came out of this run, where that is the answer.
+            "refusals": [dict(r, agent=store.agent(r["payload"].get("agent_id", "")))
+                         for r in store.publication_refusals(x["id"])],
             "step": step, "events": events,
             "registered_event": events[0]["id"] if events else None,
             "last_event": events[-1] if events else None,
             "papers": [a for a in store.artifacts() if a["experiment_id"] == x["id"]],
         }
+
+    def frontier_board(group: dict) -> list[dict]:
+        """The open questions this laboratory is chartered for, and who holds each.
+
+        A frontier protocol is one whose answer can still be beaten or refuted, so
+        the standing result has an owner: whoever measured it last. A calibration
+        protocol has no board entry — there is nothing there to win.
+        """
+        from . import protocols
+        board = []
+        for domain in group.get("domains") or []:
+            for spec in protocols.by_domain(domain):
+                if spec["kind"] != "frontier":
+                    continue
+                runs = [x for x in store.experiments_for_protocol(spec["id"])
+                        if x["status"] == "completed"]
+                holder = store.agent(runs[0]["author_id"]) if runs else None
+                board.append({
+                    "spec": spec, "holder": holder,
+                    "standing": runs[0] if runs else None,
+                    "runs": len(runs),
+                    "admitted": store.is_admitted(spec["id"]),
+                })
+        return board
 
     # ---------------------------------------------------------------- pages
 
@@ -321,6 +350,7 @@ def create_app(store: Store, engine: Engine | None = None,
                     members=store.group_members(group_id),
                     board=store.messages(group_id=group_id, limit=40),
                     experiments=[detail(x) for x in store.experiments(group_id=group_id)],
+                    frontier=frontier_board(g),
                     pubs=[a for a in store.artifacts() if a["group_id"] == group_id])
 
     @app.get("/governance", response_class=HTMLResponse)
@@ -457,7 +487,10 @@ def create_app(store: Store, engine: Engine | None = None,
             if exp["protocol_id"]:
                 runs.setdefault(exp["protocol_id"], []).append(exp)
         return page(request, "protocols.html", by_domain=by_domain, runs=runs,
-                    source_of=protocols.source_of)
+                    source_of=protocols.source_of,
+                    admission_of=store.protocol_admission,
+                    pending=store.protocol_admissions(status="proposed"),
+                    refused=store.protocol_admissions(status="refused"))
 
     @app.get("/archive", response_class=HTMLResponse)
     def archive(request: Request, before: int | None = None):

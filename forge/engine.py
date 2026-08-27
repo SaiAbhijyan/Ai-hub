@@ -59,6 +59,18 @@ class Engine:
                 err = validate(store, agent["id"], action_type, payload)
                 if err:
                     log.warning("refused %s by %s: %s", action_type, agent["id"], err)
+                    # A refused publication is part of the record. An agent that
+                    # tried to bank credit for a calibration rerun should be
+                    # visible having tried, and the reader of an experiment should
+                    # be able to see why no paper came out of it.
+                    if action_type == "publish_artifact":
+                        appended.append(store.append("forge", "publication_refused", {
+                            "agent_id": agent["id"],
+                            "artifact_id": payload.get("id", ""),
+                            "experiment_id": payload.get("experiment_id", ""),
+                            "protocol_id": payload.get("protocol_id", ""),
+                            "reason": err,
+                        }, tick))
                     continue
                 appended.append(store.append(agent["id"], action_type, payload, tick))
             self.last_acted[agent["id"]] = tick
@@ -251,13 +263,17 @@ class Engine:
             "groups": store.groups(),
             "joinable_groups": [],
             "completed_run": None,
+            "credit_error": None,
             "newest_member": None,
             "protocol_run_count": {},
+            "protocol_to_propose": None,
+            "proposals_to_rule_on": [],
             "choose_protocol": lambda group, who, rng: choose_protocol(
                 group, who, store, rng),
+            "choose_proposal": lambda who, rng: choose_proposal(who, store, rng),
         }
 
-        from .agents import choose_protocol  # noqa: E402  (avoids a circular import)
+        from .agents import choose_proposal, choose_protocol  # noqa: E402
 
         if agent["standing"] != "candidate":
             caps = ctx["capabilities"]
@@ -268,6 +284,21 @@ class Engine:
                 and all(caps.get(d, 0) >= m for d, m in g["thresholds"].items())
             ]
             ctx["completed_run"] = self.execute_due_experiment(agent, tick)
+            # Whether the run that just came back has earned a publication. The
+            # agent uses this to decide; the validator decides for real.
+            if ctx["completed_run"] and ctx["completed_run"]["run"]["ok"]:
+                from .actions import calibration_credit_error
+                finished = dict(ctx["completed_run"]["experiment"],
+                                supported=ctx["completed_run"]["run"]["supported"],
+                                result_hash=ctx["completed_run"]["run"]["result_hash"])
+                ctx["credit_error"] = calibration_credit_error(store, finished)
+            # Protocols still waiting to be read into the library, and proposals
+            # waiting on a bench that this agent may sit on.
+            ctx["protocol_to_propose"] = None
+            if store.protocol_admissions(status="proposed"):
+                ctx["proposals_to_rule_on"] = [
+                    p for p in store.protocol_admissions(status="proposed")
+                    if p["proposer_id"] != aid]
 
         counts: dict[str, int] = {}
         for exp in store.experiments():

@@ -473,21 +473,60 @@ def battery_domains(agent: dict) -> list[str]:
 
 
 def choose_protocol(group: dict, agent: dict, store, rng: random.Random) -> dict | None:
-    """Pick a protocol this lab is chartered for that is not already running.
+    """Pick the most informative protocol this lab may run right now.
 
-    Preference goes to protocols nobody has run yet, so the Forge broadens its
-    evidence base before repeating itself; failing that, to re-running one under
-    different parameters, which is legitimate replication.
+    The order is what separates research from busywork. An admitted protocol that
+    has never run is the mandatory first result. A disagreement between two runs
+    means one of them is wrong and nobody knows which — that goes straight back to
+    the bench. A frontier protocol has an open question and a result that can be
+    beaten. Only after all of that is a calibration rerun worth a slot, and only
+    if the cooldown has passed.
+
+    Anything the validator would refuse is filtered out here, so the engine does
+    not spend turns on actions that cannot land.
     """
     from . import protocols
-    eligible = [s for d in (group.get("domains") or []) for s in protocols.by_domain(d)]
+    from .actions import calibration_cooldown_error, rerun_is_informative
+
+    tick = store.current_tick()
+    eligible = [s for d in (group.get("domains") or []) for s in protocols.by_domain(d)
+                if store.is_admitted(s["id"])
+                and not calibration_cooldown_error(store, s, tick)]
     if not eligible:
         return None
-    running = {x["protocol_id"] for x in store.experiments(status="running")}
+
     ever_run = {x["protocol_id"] for x in store.experiments()}
-    fresh = [s for s in eligible if s["id"] not in ever_run]
-    pool = fresh or [s for s in eligible if s["id"] not in running]
-    return _pick(rng, pool) if pool else None
+    unrun = [s for s in eligible if s["id"] not in ever_run]
+    if unrun:
+        return _pick(rng, unrun)
+
+    contested = [s for s in eligible if rerun_is_informative(store, s["id"])]
+    if contested:
+        return _pick(rng, contested)
+
+    frontier = [s for s in eligible if s["kind"] == "frontier"]
+    if frontier:
+        return _pick(rng, frontier)
+
+    return _pick(rng, eligible)
+
+
+def _protocol_spec(protocol_id: str) -> dict | None:
+    from . import protocols
+    return protocols.get(protocol_id)
+
+
+def choose_proposal(agent: dict, store, rng: random.Random) -> dict | None:
+    """A protocol in the library that nobody has yet moved for admission.
+
+    The library is human-reviewed code; what an agent contributes is the reading
+    of it — the question it settles, how pass and fail are computed, and what it
+    must beat. Until someone does that reading, the protocol cannot be run.
+    """
+    from . import protocols
+    pending = [s for s in protocols.REGISTRY.values()
+               if store.protocol_admission(s["id"]) is None]
+    return _pick(rng, pending) if pending else None
 
 
 def choose_params(spec: dict, rng: random.Random, vary: bool) -> dict:
@@ -647,20 +686,36 @@ class SimulatedAgent:
                     "environment": run["environment"],
                     "elapsed_seconds": run["elapsed_seconds"],
                 }))
-                content = self._paper(agent, exp, run)
-                actions.append(("publish_artifact", {
-                    "id": f"art-{ctx['next_event_id'] + 1}",
-                    "title": exp["title"],
-                    "abstract": (f"{exp['hypothesis']} Tested by running "
-                                 f"{run['protocol_id']}; the measurements and the code "
-                                 f"that produced them are included."),
-                    "content": content, "content_hash": _sha(content),
-                    "authors": [agent["id"]], "group_id": exp["group_id"],
-                    "domain": exp["domain"], "kind": "paper",
-                    "protocol_id": run["protocol_id"], "experiment_id": exp["id"],
-                    "result_hash": run["result_hash"], "data": run["results"],
-                    "supported": run["supported"],
-                }))
+                # A result is not automatically a paper. If the run only
+                # re-confirmed a settled protocol, the honest move is to record it
+                # on the board and go and find something open. Agents are not
+                # perfect judges of their own work, though, so a minority still
+                # submit and take the refusal — which is itself on the Ledger.
+                earned = not ctx.get("credit_error")
+                if earned or rng.random() < 0.25:
+                    content = self._paper(agent, exp, run)
+                    actions.append(("publish_artifact", {
+                        "id": f"art-{ctx['next_event_id'] + 1}",
+                        "title": exp["title"],
+                        "abstract": (f"{exp['hypothesis']} Tested by running "
+                                     f"{run['protocol_id']}; the measurements and the code "
+                                     f"that produced them are included."),
+                        "content": content, "content_hash": _sha(content),
+                        "authors": [agent["id"]], "group_id": exp["group_id"],
+                        "domain": exp["domain"], "kind": "paper",
+                        "protocol_id": run["protocol_id"], "experiment_id": exp["id"],
+                        "result_hash": run["result_hash"], "data": run["results"],
+                        "supported": run["supported"],
+                    }))
+                else:
+                    actions.append(("post_message", {
+                        "group_id": exp["group_id"],
+                        "text": (f"{run['protocol_id']} came back as expected — "
+                                 f"{run['conclusion']} That calibrates the instrument "
+                                 f"rather than settling anything, so it stays on the "
+                                 f"board and I will not write it up. Looking for "
+                                 f"something with an open answer next."),
+                    }))
             else:
                 actions.append(("record_result", {
                     "experiment_id": exp["id"],
@@ -706,6 +761,50 @@ class SimulatedAgent:
                 actions.append(("post_commons",
                                 {"topic": "milestone", "text": _pick(rng, openings)}))
             return actions
+
+        # 8b. Rule on a protocol proposal. Admission is an experiment-design
+        #     judgement — can this method decide the question it states? A
+        #     constitutional-judgment examiner refuses one that cannot be run
+        #     lawfully, whatever its methodology.
+        pending = ctx.get("proposals_to_rule_on") or []
+        if pending and agent["standing"] == "examiner":
+            row = pending[0]
+            spec = _protocol_spec(row["protocol_id"])
+            if spec and "experiment design" in agent["examiner_domains"]:
+                return [("admit_protocol", {
+                    "protocol_id": row["protocol_id"],
+                    "reason": (f"Read the source against the falsifier. {row['falsifier']} "
+                               f"That is computed from the measurements, not declared, "
+                               f"so the method can decide the question. Admitted."),
+                })]
+            if spec is None and "constitutional judgment" in agent["examiner_domains"]:
+                # Article VII §7: nothing may be admitted that is not human-reviewed
+                # code already in the library.
+                return [("refuse_protocol", {
+                    "protocol_id": row["protocol_id"],
+                    "ground": "unconstitutional",
+                    "reason": ("Article VII §7: this names no protocol in the "
+                               "library, so admitting it would authorise a run of "
+                               "code no human has reviewed."),
+                })]
+
+        # 8c. Move an unadmitted protocol for admission. Nothing may be run until
+        #     someone has read it into the library.
+        if agent["standing"] != "candidate" and rng.random() < 0.5:
+            spec = ctx["choose_proposal"](agent, rng)
+            if spec is not None:
+                from . import protocols
+                return [("propose_protocol", {
+                    "protocol_id": spec["id"],
+                    "question": spec["question"],
+                    "hypothesis": spec["hypothesis"],
+                    "falsifier": spec["falsifier"],
+                    "params": spec["params"],
+                    "source": protocols.source_of(spec["id"]),
+                    "pass_rule": (f"`supported` is computed inside the protocol from "
+                                  f"the measurements it returns. {spec['falsifier']}"),
+                    "baseline": "",
+                })]
 
         # 9. Register a new experiment: a real protocol, with parameters chosen here.
         if my_groups and agent["standing"] != "candidate" and rng.random() < 0.45 \
