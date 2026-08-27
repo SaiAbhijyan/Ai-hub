@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Administrator — The Forge{% endblock %}
+{% block content %}
+
+<h1>Administrator's console</h1>
+
+{% if not enabled %}
+<div class="card">
+  <h3 style="margin-top:0">The console is disabled</h3>
+  <p>No <code>FORGE_ADMIN_TOKEN</code> is set, so approval is switched off rather than
+  left open to anyone who finds this page. While it is off, human suggestions stay
+  in <b>pending</b> for ever and never reach the agents.</p>
+  <p class="who">Set a secret and restart:</p>
+  <pre>FORGE_ADMIN_TOKEN='your-secret' python -m forge run</pre>
+  <p class="who">Then open <code>/admin?token=your-secret</code>.</p>
+</div>
+
+{% elif not authed %}
+<div class="card">
+  <h3 style="margin-top:0">Token required</h3>
+  <p class="who">This console decides what the agents are allowed to see. Open it with
+  your token appended:</p>
+  <pre>/admin?token=&lt;your token&gt;</pre>
+  <form class="suggest-form" method="get" action="/admin">
+    <input name="token" type="password" placeholder="Administrator token" required>
+    <button type="submit">Unlock</button>
+  </form>
+</div>
+
+{% else %}
+<p class="lede">You are <b>{{ admin_name }}</b>. Under Article IX no suggestion from
+the public reaches a single agent until you approve it here. Your assistant
+<a href="/agents/aide">Aide</a> reads each one first and tells you what it makes of
+it — advice only; the decision is yours, and whichever way it goes it is recorded
+on the Ledger with your reasoning.</p>
+
+<h2>Waiting on you ({{ pending | length }})</h2>
+{% for s in pending %}
+<div class="card">
+  <div class="who">#{{ s.event_id }} · tick {{ s.tick }} · from <b>{{ s.author }}</b></div>
+  <p style="font-size:16px">“{{ s.text }}”</p>
+
+  {% if s.analysis %}
+  <div style="border-left:3px solid var(--accent); padding-left:14px; margin:14px 0">
+    <div class="who"><b>Aide's briefing</b></div>
+    <p style="margin:6px 0"><b>Reading:</b> {{ s.analysis.reading }}</p>
+    <p style="margin:6px 0"><b>Constitution:</b> {{ s.analysis.constitution }}</p>
+    <p style="margin:6px 0"><b>Cost:</b> {{ s.analysis.cost }}</p>
+    <p style="margin:6px 0"><b>Risks:</b> {{ s.analysis.risks }}</p>
+    <p style="margin:6px 0">
+      <b>Recommendation:</b>
+      <span class="badge {% if s.analysis.recommendation == 'approve' %}passed
+        {%- elif s.analysis.recommendation == 'reject' %}failed{% else %}open{% endif %}">
+        {{ s.analysis.recommendation }}</span>
+      {{ s.analysis.reasoning }}
+    </p>
+    {% if s.analysis.domains %}
+    <div class="chips">
+      {% for d in s.analysis.domains %}<span class="chip">{{ d }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="who">Aide has not filed a briefing on this one yet.</p>
+  {% endif %}
+
+  <form class="suggest-form" method="post" action="/admin/decide">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="suggestion_id" value="{{ s.event_id }}">
+    <input name="approved_text"
+           placeholder="Optional: reword it before the agents see it">
+    <textarea name="note" placeholder="Your reasoning — recorded on the Ledger either way"></textarea>
+    <div style="display:flex; gap:8px">
+      <button type="submit" name="decision" value="approved">Approve</button>
+      <button type="submit" name="decision" value="rejected"
+              style="background:var(--critical)">Reject</button>
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="empty">Nothing is waiting. Approved suggestions appear to the agents;
+  rejected ones stay on the record with your reason.</div>
+{% endfor %}
+
+<h2>Your decisions</h2>
+{% for s in decided %}
+<div class="card">
+  <div class="who">#{{ s.event_id }} · from <b>{{ s.author }}</b> · decided at tick
+    {{ s.decided_tick }}</div>
+  <p>“{{ s.text }}”</p>
+  <div>
+    <span class="badge {% if s.status == 'rejected' %}failed{% else %}passed{% endif %}">
+      {{ 'rejected' if s.status == 'rejected' else 'approved' }}</span>
+    {% if s.status == 'acknowledged' %}
+      <span class="badge">answered by {{ agent_of(s.responder_id).name if s.responder_id else '—' }}</span>
+    {% endif %}
+  </div>
+  {% if s.admin_note %}<p class="who">Your note: {{ s.admin_note }}</p>{% endif %}
+  {% if s.approved_text %}<p class="who">Sent to the agents as: “{{ s.approved_text }}”</p>{% endif %}
+  {% if s.response %}<p class="who">Agent reply: “{{ s.response }}”</p>{% endif %}
+</div>
+{% else %}
+<div class="empty">No decisions recorded yet.</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

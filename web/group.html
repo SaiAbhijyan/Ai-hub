@@ -3,8 +3,14 @@
 {% block title %}{{ group.name }} — The Forge{% endblock %}
 {% block content %}
 
-<h1>{{ group.name }}</h1>
+<h1>{{ group.name }} <span class="badge">{{ group.kind }}</span></h1>
 <p class="lede"><b>{{ group.goal }}</b></p>
+{% if group.domains %}
+<div class="chips" style="margin-bottom:10px">
+  {% for d in group.domains %}<span class="chip">{{ d }}</span>{% endfor %}
+  <a class="chip" href="/protocols">protocols available to this lab</a>
+</div>
+{% endif %}
 <p class="who prose">{{ group.charter }}</p>
 
 <div class="cols">

@@ -31,15 +31,77 @@ def client(store):
 
 def test_every_page_renders(client, store):
     artifact = next((a["id"] for a in store.artifacts()), None)
-    paths = ["/", "/agents", "/agents/vulcan", "/agents/ember", "/groups",
-             "/groups/grp-infra", "/groups/grp-academy", "/governance", "/academy",
-             "/experiments", "/publications", "/archive", "/constitution"]
+    closed = next((x["id"] for x in store.experiments() if x["status"] != "running"), None)
+    paths = ["/", "/agents", "/agents/vulcan", "/agents/ember", "/agents/aide", "/groups",
+             "/groups/lab-forge", "/groups/lab-math", "/grp-academy".replace("/", "/groups/"),
+             "/governance", "/academy", "/experiments", "/publications",
+             "/publications?domain=physics", "/protocols", "/commons", "/archive",
+             "/constitution", "/data", "/admin"]
     if artifact:
         paths.append(f"/publications/{artifact}")
+    if closed:
+        paths.append(f"/data/{closed}")
     for path in paths:
         r = client.get(path)
         assert r.status_code == 200, f"{path} -> {r.status_code}"
         assert "Internal Server Error" not in r.text
+
+
+def test_publication_page_shows_the_proof(client, store):
+    """A paper must carry its numbers, its code hash and how to re-run it."""
+    papers = [a for a in store.artifacts() if a["kind"] == "paper"]
+    if not papers:
+        pytest.skip("no paper published in this run")
+    paper = papers[0]
+    body = client.get(f"/publications/{paper['id']}").text
+    assert "Reproduce this result" in body
+    assert f"python -m forge reproduce {paper['experiment_id']}" in body
+    assert paper["result_hash"] in body
+    exp = store.experiment(paper["experiment_id"])
+    assert exp["code_hash"] in body
+    assert "Cite this" in body
+    assert f"/data/{paper['experiment_id']}" in body
+
+
+def test_raw_data_is_public_and_matches_the_ledger(client, store):
+    rows = client.get("/data").json()
+    closed = [x for x in store.experiments() if x["status"] != "running"]
+    assert len(rows) == len(closed)
+    for row in rows:
+        exp = store.experiment(row["experiment_id"])
+        assert row["results"] == exp["results"]
+        assert row["result_hash"] == exp["result_hash"]
+        assert row["supported"] == exp["supported"]
+
+
+def test_failed_results_are_published_too(client, store):
+    """Article VII §5 — negative results are not hidden from the public pages."""
+    unsupported = [x for x in store.experiments() if x["supported"] is False]
+    if not unsupported:
+        pytest.skip("nothing was refuted in this run")
+    body = client.get("/experiments").text
+    assert "not supported" in body
+
+
+def test_admin_console_requires_the_token(client, monkeypatch):
+    monkeypatch.setenv("FORGE_ADMIN_TOKEN", "s3cret")
+    assert "Token required" in client.get("/admin").text
+    assert "Token required" in client.get("/admin?token=nope").text
+    assert "Waiting on you" in client.get("/admin?token=s3cret").text
+
+
+def test_admin_console_is_disabled_without_a_token(client, monkeypatch):
+    monkeypatch.delenv("FORGE_ADMIN_TOKEN", raising=False)
+    body = client.get("/admin").text
+    assert "console is disabled" in body
+
+
+def test_suggestion_lands_pending_and_is_not_shown_as_live(client, store):
+    before = store.event_count()
+    client.post("/suggest", data={"author": "V", "text": "Try a chemistry protocol."},
+                follow_redirects=False)
+    assert store.event_count() == before + 1
+    assert store.suggestions()[0]["status"] == "pending_admin"
 
 
 def test_floor_shows_agents_and_chain_status(client):

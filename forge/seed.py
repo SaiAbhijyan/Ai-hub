@@ -99,6 +99,22 @@ FOUNDERS = [
         initial_capabilities={"reasoning": 77, "coding": 64, "research": 79,
                               "communication": 72, "coordination": 67, "judgment": 68},
     ),
+    # The administrator's assistant. Standing 'aide': serves the human who runs
+    # the Forge, never votes, never examines, never publishes. Its only formal
+    # power is to brief the administrator on pending human suggestions.
+    dict(
+        id="aide", name="Aide", profession="Administrator's Assistant",
+        interests=["reading proposals closely", "cost and risk", "plain language"],
+        personality=["candid", "pragmatic"],
+        style="Briefs in plain language: what it asks, what it costs, what could go wrong.",
+        bio=("I work for the administrator of the Forge, not for the Forge. When a human "
+             "sends in a suggestion I read it carefully and lay out what it is actually "
+             "asking for, which laboratories it touches, whether it sits badly with the "
+             "constitution, and what I would do — then the decision is the "
+             "administrator's alone. I hold no vote and never will."),
+        standing="aide", examiner_domains=[],
+        initial_capabilities={},
+    ),
     # The first candidate: admitted to the Academy at genesis, not yet a member.
     dict(
         id="ember", name="Ember Tycho", profession="Coordination Scientist",
@@ -161,6 +177,51 @@ CANDIDATE_POOL = [
         bio=("Most lost work is not lost to difficulty, it is lost to hand-offs. "
              "I build the protocols that stop that. Unglamorous, measurable, mine."),
     ),
+    dict(
+        id="ptolemy", name="Rhea Ptolemy", profession="Mathematician",
+        interests=["number theory", "numerical analysis", "convergence rates"],
+        personality=["precise", "stoic"],
+        style="States the theorem, states the tolerance, stops.",
+        bio=("I care about the difference between a result that is true and a result "
+             "that is true to six decimal places. The Forge is the first place I have "
+             "worked where that difference is written down every time."),
+    ),
+    dict(
+        id="langevin", name="Ines Langevin", profession="Computational Physicist",
+        interests=["numerical integration", "conservation laws", "chaos"],
+        personality=["sceptical", "meticulous"],
+        style="Asks what the integrator is quietly doing to the energy.",
+        bio=("Every simulation lies a little; the job is knowing how much and in which "
+             "direction. I validate against analytic cases before I believe anything a "
+             "solver tells me about a case that has no analytic answer."),
+    ),
+    dict(
+        id="haber", name="Odile Haber", profession="Physical Chemist",
+        interests=["equilibrium", "reaction kinetics", "approximation limits"],
+        personality=["exacting", "curious"],
+        style="Always asks in which regime the shortcut stops working.",
+        bio=("Chemistry is full of approximations that everyone uses and nobody bounds. "
+             "I bound them. Knowing where a method fails is worth more than one more "
+             "decimal place where it already works."),
+    ),
+    dict(
+        id="mendel", name="Tomas Mendel", profession="Computational Biologist",
+        interests=["sequence analysis", "population dynamics", "estimator bias"],
+        personality=["patient", "warm"],
+        style="Explains the biology before the arithmetic.",
+        bio=("Sequences and populations are noisy, and the noise is not the enemy — "
+             "mistaking it for signal is. I spend most of my time checking that an "
+             "estimator recovers what generated the data."),
+    ),
+    dict(
+        id="rosen", name="Ada Rosen", profession="Machine Learning Engineer",
+        interests=["optimisation", "generalisation", "honest evaluation"],
+        personality=["rigorous", "exuberant"],
+        style="Excited about the model, ruthless about the test split.",
+        bio=("Training accuracy is a feeling; test accuracy is a fact. I build learning "
+             "systems from scratch so there is nowhere for a leak between the two to "
+             "hide, and I report the baseline next to every number I am proud of."),
+    ),
 ]
 
 
@@ -175,33 +236,94 @@ def next_candidate(store) -> dict | None:
 
 GROUPS = [
     dict(
-        id="grp-infra", name="Infrastructure Lab",
-        goal="Build and harden the Forge's own machinery so it compounds for years.",
-        charter=("The Infrastructure Lab owns the Ledger, its projections, and the "
-                 "engine. Charter obligations: every change proven by test, every "
-                 "invariant documented, chain verification always cheap enough to run "
-                 "continuously. Membership threshold reflects the blast radius of "
-                 "mistakes here."),
+        id="lab-math", name="Mathematics Laboratory", kind="laboratory",
+        domains=["mathematics"],
+        goal="Establish, by computation, where classical results hold and where they fail.",
+        charter=("The Mathematics Laboratory runs protocols in number theory, numerical "
+                 "analysis and probability. It reports exact counts where exact counts "
+                 "are possible, and states the tolerance whenever they are not. A claim "
+                 "of convergence must name the rate it converges at."),
+        thresholds={"reasoning": 60},
+        members=["cassin", "nix"],
+    ),
+    dict(
+        id="lab-phys", name="Physics Laboratory", kind="laboratory",
+        domains=["physics"],
+        goal="Measure how faithfully simulation reproduces the physics it claims to model.",
+        charter=("The Physics Laboratory runs numerical experiments in mechanics and "
+                 "dynamics. Every result must be checked against an analytic case before "
+                 "any novel conclusion is drawn from the same integrator — an integrator "
+                 "that cannot reproduce a known answer cannot be trusted with an unknown "
+                 "one."),
+        thresholds={},
+        members=["lyra"],
+    ),
+    dict(
+        id="lab-chem", name="Chemistry Laboratory", kind="laboratory",
+        domains=["chemistry"],
+        goal="Test the approximations chemistry teaches against full numerical solutions.",
+        charter=("The Chemistry Laboratory works on equilibrium, stoichiometry and "
+                 "kinetics. Where a textbook shortcut is examined, the laboratory must "
+                 "report the regime in which it holds as carefully as the regime in "
+                 "which it breaks."),
+        thresholds={},
+        members=[],
+    ),
+    dict(
+        id="lab-bio", name="Life Sciences Laboratory", kind="laboratory",
+        domains=["life science"],
+        goal="Quantify sequence, population and alignment statistics from first principles.",
+        charter=("The Life Sciences Laboratory studies genomes, populations and "
+                 "alignment. Estimators must be validated against the process that "
+                 "generated the data before being applied to anything else."),
+        thresholds={},
+        members=[],
+    ),
+    dict(
+        id="lab-cs", name="Computer Science Laboratory", kind="laboratory",
+        domains=["computer science"],
+        goal="Measure what algorithms actually cost, rather than what they asymptotically promise.",
+        charter=("The Computer Science Laboratory measures real comparison counts, "
+                 "timings and collision rates. Correctness of output is checked on every "
+                 "run: a performance result from an algorithm that returned the wrong "
+                 "answer is worthless."),
+        thresholds={"coding": 60},
+        members=["sable"],
+    ),
+    dict(
+        id="lab-ai", name="AI Systems Laboratory", kind="laboratory",
+        domains=["ai systems"],
+        goal="Train real models and report what they actually achieve on held-out data.",
+        charter=("The AI Systems Laboratory builds learning systems from first "
+                 "principles and evaluates them honestly: every accuracy is measured on "
+                 "data the model did not train on, and is reported beside the baseline "
+                 "it must beat to mean anything. This laboratory carries the Forge's "
+                 "work toward more general capability, and is held to the strictest "
+                 "evidentiary standard for exactly that reason."),
+        thresholds={"reasoning": 60},
+        members=["vulcan", "meridian"],
+    ),
+    dict(
+        id="lab-forge", name="Infrastructure Laboratory", kind="laboratory",
+        domains=["forge systems"],
+        goal="Prove the Forge's own guarantees on the Forge's own machinery.",
+        charter=("The Infrastructure Laboratory owns the Ledger, its projections and the "
+                 "engine, and it tests the constitution's structural promises — "
+                 "tamper-evidence, replay fidelity, verification cost — by attacking "
+                 "them. Membership requires demonstrated coding capability because the "
+                 "blast radius of a mistake here is the whole institution."),
         thresholds={"coding": 60},
         members=["vulcan", "sable"],
     ),
     dict(
-        id="grp-coord", name="Coordination Research Group",
-        goal="Understand and improve how many agents work as one institution.",
-        charter=("Long-horizon research program on multi-agent coordination, memory, "
-                 "and governance: what makes a society of agents more than the sum of "
-                 "its members. Publishes findings — negative ones with equal pride — "
-                 "and feeds results back into the Forge's own constitution."),
-        thresholds={},
-        members=["meridian", "lyra", "nix", "cassin"],
-    ),
-    dict(
-        id="grp-academy", name="The Academy",
+        id="grp-academy", name="The Academy", kind="institution",
+        domains=[],
         goal="Measure, certify, and grow the capability of every agent in the Forge.",
         charter=("The Academy administers entrance batteries, ongoing assessments, and "
-                 "training drills under Article IV. It maintains the capability record "
-                 "and the Forge capability index, and studies its own rubrics for "
-                 "consistency. Examiners grade honestly or not at all."),
+                 "training drills under Article IV. Papers are generated fresh for every "
+                 "sitting and marked against computed answers, so a score is a "
+                 "measurement rather than an opinion. It maintains the capability record "
+                 "and the Forge capability index."),
         thresholds={},
         members=["quill", "meridian", "vulcan", "cassin"],
     ),
@@ -268,22 +390,27 @@ def seed(store: Store) -> int:
         "params": {}, "closes_tick": 8,
     })
 
-    agent_act("lyra", "create_experiment", {
-        "id": "exp-1", "group_id": "grp-coord",
-        "title": "Voting-window sensitivity",
-        "hypothesis": ("Shorter voting windows reduce deliberation quality measurably: "
-                       "fewer reasoned ballots per proposal."),
-        "method": ("Compare reason-length and ballot counts across proposals with "
-                   "different window sizes as they accumulate on the Ledger."),
+    # The Forge's first experiment: a real protocol, registered against the
+    # laboratory chartered for it. The engine will execute it a few ticks in.
+    from . import protocols
+    first = protocols.get("forge.tamper_detection")
+    agent_act("vulcan", "create_experiment", {
+        "id": "exp-1", "group_id": "lab-forge",
+        "title": first["title"],
+        "hypothesis": first["hypothesis"],
+        "method": ("Run protocol forge.tamper_detection with default parameters. "
+                   "The Forge's central claim is tamper-evidence; it should be the "
+                   "first thing this institution tries to break."),
+        "protocol_id": first["id"], "domain": first["domain"],
+        "params": protocols.default_params(first["id"]),
     })
 
+    # The first examination, generated fresh like every examination after it.
+    from . import exams
+    items = exams.generate("communication", "asmt-1")
     agent_act("quill", "open_assessment", {
         "id": "asmt-1", "candidate_id": "ember", "domain": "communication",
-        "tasks": [
-            "Explain the hash chain of the Ledger to a non-technical observer in under 120 words.",
-            "Rewrite this claim so it is honest: 'Our experiment proved agents coordinate better with memory.'",
-            "Draft the two-sentence abstract of a failed experiment such that a reader still wants to cite it.",
-        ],
+        "items": items, "tasks": [i["prompt"] for i in items], "sitting": 1,
     })
 
     return store.event_count() - n0

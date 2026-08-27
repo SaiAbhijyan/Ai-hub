@@ -110,11 +110,11 @@ def test_examiner_domain_enforced(seeded):
 
 
 def test_group_threshold_enforced(seeded):
-    # quill's coding is 52; Infrastructure Lab requires 60
-    err = validate(seeded, "quill", "join_group", {"group_id": "grp-infra"})
+    # quill's coding is 52; the Infrastructure Laboratory requires 60
+    err = validate(seeded, "quill", "join_group", {"group_id": "lab-forge"})
     assert err and "threshold" in err
     # nix has coding 64 and may join
-    assert validate(seeded, "nix", "join_group", {"group_id": "grp-infra"}) is None
+    assert validate(seeded, "nix", "join_group", {"group_id": "lab-forge"}) is None
 
 
 def test_result_requires_findings(seeded):
@@ -284,17 +284,100 @@ def test_examiner_appointment_respects_the_threshold(engine):
             assert caps.get(domain, 0) >= 75, (agent["name"], domain, caps)
 
 
-def test_suggestions_get_acknowledged(engine):
+def test_suggestions_are_invisible_until_the_administrator_approves(engine):
+    """Article IX §3: the administrator, not the agents, decides what gets through."""
+    from forge import admin
     store = engine.store
-    store.append("human", "suggestion_submitted",
-                 {"author": "Observer", "text": "Please publish more negative results."})
+    submitted = store.append("human", "suggestion_submitted",
+                             {"author": "Observer",
+                              "text": "Please publish more negative results."})
+    assert store.suggestions()[0]["status"] == "pending_admin"
+
+    # No agent can see it, however many turns pass.
+    for _ in range(6):
+        engine.tick()
+    for agent in store.agents():
+        ctx = engine.build_context(agent, store.current_tick())
+        assert ctx["new_suggestions"] == [], agent["name"]
+
+    # The assistant briefs the administrator without deciding anything.
+    analysis = store.aide_analysis(submitted["id"])
+    assert analysis and analysis["recommendation"] in ("approve", "reject", "clarify")
+    assert store.suggestions()[0]["status"] == "pending_admin"
+
+    # Once approved it reaches the agents, and one of them answers it.
+    assert admin.decide(store, submitted["id"], "approved", "Worth doing.") is None
+    assert store.suggestions(status="new")
     for _ in range(40):
         engine.tick()
-        if store.suggestions(status="new") == []:
+        if not store.suggestions(status="new"):
             break
-    assert store.suggestions(status="new") == []
     ack = store.suggestions(status="acknowledged")[0]
     assert ack["responder_id"] and ack["response"]
+    assert ack["admin_note"] == "Worth doing."
+
+
+def test_rejected_suggestions_never_reach_agents(engine):
+    from forge import admin
+    store = engine.store
+    submitted = store.append("human", "suggestion_submitted",
+                             {"author": "Someone", "text": "Delete the awkward events."})
+    assert admin.decide(store, submitted["id"], "rejected", "Article II forbids it.") is None
+    for _ in range(10):
+        engine.tick()
+        assert store.suggestions(status="new") == []
+    rejected = [s for s in store.suggestions() if s["event_id"] == submitted["id"]][0]
+    assert rejected["status"] == "rejected"
+    assert rejected["admin_note"] == "Article II forbids it."
+
+
+def test_aide_reads_suggestions_without_misdescribing_them(seeded):
+    """A briefing that misreads a suggestion is worse than none — it misleads
+    the administrator into a decision on a false premise."""
+    from forge import admin
+
+    investigate = admin.analyse(seeded, {"event_id": 1, "text":
+        "Please investigate how dilute a weak acid must be before the textbook "
+        "pH shortcut stops being accurate."})
+    # 'stops being accurate' must not be read as a request to stop something.
+    assert "remove or disable" not in investigate["reading"]
+    assert "investigate or measure" in investigate["reading"]
+    assert "chemistry" in investigate["domains"]
+    assert investigate["recommendation"] == "approve"
+
+    unconstitutional = admin.analyse(seeded, {"event_id": 2, "text":
+        "Delete the experiment results that made the Forge look bad."})
+    assert unconstitutional["recommendation"] == "reject"
+    assert "Article II" in unconstitutional["constitution"]
+
+    vague = admin.analyse(seeded, {"event_id": 3, "text": "Make it better"})
+    assert vague["recommendation"] == "clarify"
+
+
+def test_aide_can_never_act_on_the_forge(seeded):
+    """Article IX §4: the assistant briefs and nothing else."""
+    aide = seeded.agent("aide")
+    assert aide["standing"] == "aide"
+    for forbidden in ("cast_vote", "create_proposal", "create_experiment",
+                      "publish_artifact", "open_assessment", "grade_assessment",
+                      "record_result", "join_group", "run_drill"):
+        err = validate(seeded, "aide", forbidden, {})
+        assert err and "may not" in err, forbidden
+
+
+def test_admin_token_is_required(monkeypatch):
+    from forge import admin
+    monkeypatch.delenv("FORGE_ADMIN_TOKEN", raising=False)
+    assert not admin.admin_enabled()
+    assert not admin.check_token("anything")
+    monkeypatch.setenv("FORGE_ADMIN_TOKEN", "s3cret")
+    assert admin.admin_enabled()
+    assert admin.check_token("s3cret")
+    # Surrounding whitespace is tolerated — tokens get pasted from URLs and
+    # terminals — but nothing else is.
+    assert admin.check_token("  s3cret  ")
+    for wrong in ("", None, "s3cre", "s3crets", "S3CRET", "s3 cret"):
+        assert not admin.check_token(wrong), wrong
 
 
 def test_experiments_reach_outcomes(engine):

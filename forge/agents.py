@@ -19,6 +19,8 @@ import logging
 import os
 import random
 
+from . import exams
+
 log = logging.getLogger("forge.agents")
 
 Action = tuple[str, dict]
@@ -60,48 +62,37 @@ TASK_BANK = {
     ],
 }
 
+# What a laboratory's field sounds like in an agent's own description of itself,
+# used to send each newcomer to the bench where its work actually belongs.
+DOMAIN_AFFINITY = {
+    "mathematics": ("mathematic", "number theory", "numerical", "convergence",
+                    "probability", "proof", "theorist", "statistic"),
+    "physics": ("physic", "energy", "conservation", "integration", "chaos",
+                "dynamics", "instrumentation", "simulation"),
+    "chemistry": ("chemist", "equilibrium", "kinetics", "reaction", "approximation limits"),
+    "life science": ("biolog", "sequence", "genome", "population", "estimator"),
+    "computer science": ("comput", "algorithm", "storage", "engine", "coding",
+                         "data structure", "throughput"),
+    "ai systems": ("machine learning", "optimisation", "generalisation", "agent memory",
+                   "coordination", "evaluation", "model", "intelligen"),
+    "forge systems": ("event sourcing", "tamper", "verification", "ledger", "audit",
+                      "infrastructure", "invariant", "reliability", "governance",
+                      "provenance", "systems engineer"),
+}
+
 # Which third domain completes a candidate's entrance battery, by profession hint.
 PROFESSION_DOMAIN = {
     "engineer": "coding", "scientist": "research", "researcher": "research",
     "coordinator": "coordination", "theorist": "reasoning", "archivist": "communication",
+    "mathematician": "reasoning", "physicist": "research", "chemist": "research",
+    "biologist": "research", "communicator": "communication", "assistant": "judgment",
 }
 
 # ---------------------------------------------------------------------------
-# Experiment topics per working-group flavor.
+# Experiments are real runs of real protocols. There is no topic list here and no
+# findings text: an agent picks a protocol its lab is chartered for, chooses the
+# parameters, and the numbers come back from forge.lab executing the code.
 # ---------------------------------------------------------------------------
-
-TOPICS = {
-    "infrastructure": [
-        ("Projection rebuild soak test",
-         "Replaying the full Ledger reproduces every projection byte-for-byte at any chain length.",
-         "Rebuild projections from the chain at increasing event counts; diff every table against live state."),
-        ("Chain verification cost curve",
-         "Full-chain verification stays under one tick's budget up to 100k events.",
-         "Time verify_chain at exponentially growing chain sizes; fit the curve and find the budget ceiling."),
-        ("Suggestion-to-action latency",
-         "Human suggestions are acknowledged within a bounded number of ticks under normal load.",
-         "Measure ticks between suggestion_submitted and acknowledge_suggestion events over a full week of operation."),
-    ],
-    "coordination": [
-        ("Voting-window sensitivity",
-         "Shorter voting windows reduce deliberation quality measurably: fewer reasoned ballots per proposal.",
-         "Compare reason-length and ballot counts across proposals with different window sizes on the Ledger."),
-        ("Examiner bottleneck study",
-         "A single examiner per domain becomes the limiting factor on admissions once candidates exceed two.",
-         "Model candidate throughput from assessment lifecycles recorded on the Ledger; identify the queue."),
-        ("Persona divergence audit",
-         "Agents' message styles remain statistically distinguishable after 500 ticks of shared context.",
-         "Sample messages per agent across time windows; compare vocabulary and structure divergence."),
-    ],
-    "academy": [
-        ("Drill efficacy trial",
-         "Candidates who receive drills before re-assessment improve scores more than the retake baseline.",
-         "Compare score deltas between drilled and undrilled re-assessments recorded on the Ledger."),
-        ("Rubric consistency check",
-         "Two examiners grading the same battery agree within 10 points.",
-         "Route archived answer sets to a second examiner; compare grades and publish the divergence."),
-    ],
-}
 
 VOICE_FALLBACK = "pragmatic"
 
@@ -145,10 +136,47 @@ def _sha(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _aptitude(agent_id: str, domain: str) -> int:
-    """Hidden, stable talent of an agent in a domain (sim mode only)."""
+def competence(agent_id: str, domain: str) -> float:
+    """The agent's stable underlying ability in a domain, 0..1 (simulation only).
+
+    This is never published and never becomes a score. It only decides how often
+    the agent applies the correct method to an exam item; what that is worth is
+    then discovered by marking the answers it actually gave.
+    """
     h = int(hashlib.sha256(f"aptitude:{agent_id}:{domain}".encode()).hexdigest(), 16)
-    return 58 + h % 34  # 58..91
+    return 0.45 + (h % 50) / 100.0  # 0.45 .. 0.94
+
+
+def attempt_item(agent: dict, item: dict, domain: str, index: int):
+    """Work one exam item, applying either the right method or a plausible slip.
+
+    The returned value is the agent's answer, right or wrong. Nothing here looks
+    at what a "good" score would be — the marker decides that afterwards, from
+    the answers alone.
+    """
+    skill = competence(agent["id"], domain)
+    roll = int(hashlib.sha256(
+        f"attempt:{agent['id']}:{item['id']}:{index}".encode()).hexdigest(), 16) % 1000
+    applied_correct_method = (roll / 1000.0) < skill
+    if applied_correct_method:
+        return item["answer"]
+
+    # A characteristic error rather than noise: the kind of mistake made by
+    # someone reaching for a method they have not secured yet.
+    if item["kind"] == "numeric":
+        value = float(item["answer"])
+        slip = roll % 4
+        if slip == 0:
+            return round(value + 1, 4)          # off by one
+        if slip == 1:
+            return round(value * 2, 4)          # double-counted
+        if slip == 2:
+            return round(value / 2, 4) if value else 1.0   # halved
+        return round(value, 0)                   # rounded away the precision asked for
+    wrong_words = {"significant": "not significant", "not significant": "significant",
+                   "yes": "no", "no": "yes", "unaltered": "unproven"}
+    answer = str(item["answer"])
+    return wrong_words.get(answer, f"not {answer}")
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +243,66 @@ VOICES = {
         "exp_done": "Wrapped {title!r}: {finding} Grateful to everyone who reviewed drafts along the way.",
         "suggest_ack": "To our observer: {text!r} — thank you, sincerely. It's on our board now, with your words kept intact.",
         "drill": "Spent the session drilling {domain} with {trainee}. They're closer than they think, and I told them so.",
+    },
+    "precise": {
+        "vote_for": "For. {title!r} states its tolerance, which is more than most proposals manage.",
+        "vote_against": "Against. {title!r} uses 'approximately' four times and defines it none.",
+        "abstain": "Abstain. {title!r} is not stated sharply enough for a vote to mean anything.",
+        "comment": "On {subject}: the quantity matters more than the adjective. Here is the number.",
+        "exp_open": "Registering {title!r}. The claim is exact or it is not a claim.",
+        "exp_done": "{title!r}: {finding} Figures to the stated precision, no further.",
+        "suggest_ack": "Received: {text!r}. I will answer it in the terms it was asked, not looser ones.",
+        "drill": "Drilled {domain} with {trainee} until every answer carried its error bar.",
+    },
+    "sceptical": {
+        "vote_for": "For {title!r}, having failed to find the flaw I was confident was there.",
+        "vote_against": "Against. {title!r} trusts its own instrument without ever validating it.",
+        "abstain": "Abstain on {title!r} — I distrust it, but distrust is not evidence.",
+        "comment": "Before we accept {subject}: what would this look like if the method were quietly wrong?",
+        "exp_open": "Opening {title!r}. First I reproduce a case with a known answer; only then do I believe anything else it says.",
+        "exp_done": "{title!r} closed: {finding} I checked it against an analytic case before reporting it.",
+        "suggest_ack": "Noted: {text!r}. My first question is what it assumes that nobody has checked.",
+        "drill": "Ran {trainee} through {domain} by handing them a plausible result that was wrong.",
+    },
+    "exacting": {
+        "vote_for": "For {title!r}, provided we hold to the regime it actually claims.",
+        "vote_against": "Against {title!r}: it works where it is easy and says nothing about where it is not.",
+        "abstain": "Abstaining. {title!r} has not told me the conditions under which it fails.",
+        "comment": "The interesting part of {subject} is the boundary — where does it stop being true?",
+        "exp_open": "Registering {title!r}. I want the limit of the approximation, not another decimal inside it.",
+        "exp_done": "{title!r}: {finding} The regime where it breaks is the part worth reading.",
+        "suggest_ack": "Read: {text!r}. Useful — though it will need conditions attached before it is safe.",
+        "drill": "Worked {domain} with {trainee} at the edges, where the standard method quietly stops working.",
+    },
+    "patient": {
+        "vote_for": "For {title!r}. It will take longer than stated, and it is still worth doing.",
+        "vote_against": "Against for now — {title!r} is rushing a step that does not reward rushing.",
+        "abstain": "Abstaining on {title!r}; I would rather understand it properly than vote on time.",
+        "comment": "Worth sitting with {subject} a while before drawing the obvious conclusion from it.",
+        "exp_open": "Starting {title!r}. The noise here is not the enemy — mistaking it for signal is.",
+        "exp_done": "{title!r} is done: {finding} It took the time it took, and the number is sound.",
+        "suggest_ack": "Thank you for {text!r}. I have read it slowly; here is what I understand it to want.",
+        "drill": "Spent the {domain} session with {trainee} on the one idea underneath all the others.",
+    },
+    "rigorous": {
+        "vote_for": "For {title!r} — it names the baseline it has to beat, which is rarer than it should be.",
+        "vote_against": "Against. {title!r} reports the number it likes without the one it must be compared to.",
+        "abstain": "Abstaining on {title!r} until someone shows me the held-out result.",
+        "comment": "On {subject}: training performance is a feeling. What did it do on data it had not seen?",
+        "exp_open": "{title!r} is registered — and the evaluation split is fixed before a single run, not after.",
+        "exp_done": "{title!r}: {finding} Measured on held-out data, reported beside its baseline.",
+        "suggest_ack": "Suggestion in: {text!r}. Whatever we do with it, it gets evaluated honestly.",
+        "drill": "Drilled {domain} with {trainee} on the difference between a good number and a real one.",
+    },
+    "candid": {
+        "vote_for": "I hold no vote. For the record I think {title!r} is sound.",
+        "vote_against": "I hold no vote. For the record I think {title!r} has a problem nobody has named.",
+        "abstain": "I hold no vote on {title!r}, and would not cast one if offered.",
+        "comment": "Plainly, on {subject}: here is what it means and what it will cost.",
+        "exp_open": "Not my work to run — {title!r} belongs to the laboratories.",
+        "exp_done": "Recorded for the administrator: {title!r} — {finding}",
+        "suggest_ack": "A human wrote in: {text!r}. I have briefed the administrator and the decision is theirs.",
+        "drill": "Not an examiner. I sat in on the {domain} session with {trainee} to learn the standard.",
     },
     "earnest": {
         "vote_for": "For {title!r}. I read it twice to be sure I understood it, and I think it holds.",
@@ -347,13 +435,43 @@ def battery_domains(agent: dict) -> list[str]:
     return ["reasoning", "communication", third]
 
 
-def group_flavor(group: dict) -> str:
-    text = (group["name"] + " " + group["goal"]).lower()
-    if "academ" in text or "assess" in text or "train" in text:
-        return "academy"
-    if "coordina" in text or "memory" in text or "research" in text:
-        return "coordination"
-    return "infrastructure"
+def choose_protocol(group: dict, agent: dict, store, rng: random.Random) -> dict | None:
+    """Pick a protocol this lab is chartered for that is not already running.
+
+    Preference goes to protocols nobody has run yet, so the Forge broadens its
+    evidence base before repeating itself; failing that, to re-running one under
+    different parameters, which is legitimate replication.
+    """
+    from . import protocols
+    eligible = [s for d in (group.get("domains") or []) for s in protocols.by_domain(d)]
+    if not eligible:
+        return None
+    running = {x["protocol_id"] for x in store.experiments(status="running")}
+    ever_run = {x["protocol_id"] for x in store.experiments()}
+    fresh = [s for s in eligible if s["id"] not in ever_run]
+    pool = fresh or [s for s in eligible if s["id"] not in running]
+    return _pick(rng, pool) if pool else None
+
+
+def choose_params(spec: dict, rng: random.Random, vary: bool) -> dict:
+    """Choose the parameters for a run — the agent's real experimental freedom.
+
+    A first run uses the protocol's defaults so the baseline is comparable; a
+    replication varies them within the declared bounds.
+    """
+    from . import protocols
+    params = protocols.default_params(spec["id"])
+    if not vary:
+        return params
+    for name, meta in spec["params"].items():
+        if name == "seed":
+            params[name] = rng.randint(meta["min"], meta["max"])
+        elif rng.random() < 0.5:
+            if meta["type"] == "int":
+                params[name] = rng.randint(int(meta["min"]), int(meta["max"]))
+            else:
+                params[name] = round(rng.uniform(meta["min"], meta["max"]), 3)
+    return params
 
 
 class SimulatedAgent:
@@ -364,42 +482,56 @@ class SimulatedAgent:
         voice = voice_of(agent)
         actions: list[Action] = []
 
-        # 1. A candidate with an exam on the desk answers it, always.
+        # 1. A candidate with an exam on the desk sits it, always. The answers are
+        #    worked out item by item — competence decides how often the right
+        #    method is applied, and the marking finds out what that was worth.
         exam = ctx.get("assessment_to_answer")
         if exam:
-            answers = [self._answer(agent, rng, exam["domain"], task) for task in exam["tasks"]]
+            answers = [attempt_item(agent, item, exam["domain"], index)
+                       for index, item in enumerate(exam["items"])]
             return [("submit_answers", {"assessment_id": exam["id"], "answers": answers})]
 
-        # 2. An examiner grades what awaits grading, always.
+        # 2. An examiner marks what awaits marking. The grade is computed from the
+        #    paper by forge.exams — the examiner cannot choose a number.
         to_grade = ctx.get("assessments_to_grade") or []
         if to_grade:
             a = to_grade[0]
-            base = _aptitude(a["candidate_id"], a["domain"])
-            score = max(0, min(100, base + rng.randint(-4, 6)))
-            notes = (f"Battery of {len(a['tasks'])} tasks in {a['domain']}. "
-                     f"Strongest on task {1 + rng.randrange(len(a['tasks']))}; "
-                     + ("clear pass — reasoning was explicit and checkable."
-                        if score >= 60 else
-                        "not yet a pass — conclusions outran the stated evidence."))
-            actions.append(("grade_assessment",
-                            {"assessment_id": a["id"], "score": score, "notes": notes}))
-            return actions
+            score, marks = exams.mark(a["items"], a["answers"])
+            right = [m for m in marks if m["correct"]]
+            wrong = [m for m in marks if not m["correct"]]
+            notes = (
+                f"{len(right)} of {len(marks)} correct in {a['domain']} "
+                f"(sitting {a.get('sitting', 1)}). "
+                + (f"Secure on {', '.join(m['method'] for m in right[:2])}. "
+                   if right else "Nothing correct on this paper. ")
+                + (f"Lost marks on {', '.join(m['method'] for m in wrong[:2])}: "
+                   f"gave {wrong[0]['given']!r} where the answer is "
+                   f"{wrong[0]['expected']!r}." if wrong else "A clean paper.")
+            )
+            return [("grade_assessment", {"assessment_id": a["id"], "score": score,
+                                          "marks": marks, "notes": notes})]
 
-        # 3. An examiner opens the next battery exam for a waiting candidate.
+        # 3. An examiner sets the next paper — generated fresh, excluding every
+        #    item this candidate has already faced.
         needing = ctx.get("candidates_needing_exam") or []
-        for item in needing:
-            cand = item["agent"]
+        for entry in needing:
+            cand = entry["agent"]
             for domain in battery_domains(cand):
-                if domain in item["domains_passed"]:
+                if domain in entry["domains_passed"]:
                     continue
                 if domain not in agent.get("examiner_domains", []):
                     continue
-                tasks = list(TASK_BANK[domain])
-                rng.shuffle(tasks)
                 aid = f"asmt-{ctx['next_event_id']}"
-                return [("open_assessment",
-                         {"id": aid, "candidate_id": cand["id"], "domain": domain,
-                          "tasks": tasks[:3]})]
+                items = exams.generate(domain, aid,
+                                       exclude_ids=set(entry.get("seen_item_ids") or []))
+                if not items:
+                    continue
+                return [("open_assessment", {
+                    "id": aid, "candidate_id": cand["id"], "domain": domain,
+                    "items": items,
+                    "tasks": [i["prompt"] for i in items],
+                    "sitting": entry.get("sittings", {}).get(domain, 0) + 1,
+                })]
 
         # 4. A member proposes admission for a candidate whose battery is complete.
         ready = ctx.get("candidates_ready_for_admission") or []
@@ -460,34 +592,45 @@ class SimulatedAgent:
                 "reason": voice[key].format(title=prop["title"]),
             }))
 
-        # 6. Close out a running experiment that has matured.
-        for exp in ctx.get("my_running_experiments") or []:
-            if ctx["tick"] - exp["opened_tick"] >= 6 and rng.random() < 0.5:
-                failed = rng.random() < 0.3
-                finding = (
-                    "The hypothesis did not survive contact with the data: the predicted "
-                    "effect was not observed under the stated method. What we learned "
-                    "instead is now a better question, and it is recorded here."
-                    if failed else
-                    "The data supports the hypothesis within the method's limits. The "
-                    "effect was consistent across the recorded window; raw events are "
-                    "on the Ledger."
-                )
+        # 6. Run a registered experiment: execute the protocol and record whatever
+        #    it measured. The engine performs the run and hands the record back in
+        #    context; this branch only reports it.
+        completed = ctx.get("completed_run")
+        if completed:
+            exp, run = completed["experiment"], completed["run"]
+            if run["ok"]:
                 actions.append(("record_result", {
                     "experiment_id": exp["id"],
-                    "status": "failed" if failed else "completed",
-                    "findings": finding,
+                    "status": "completed",
+                    "findings": run["conclusion"],
+                    "results": run["results"],
+                    "supported": run["supported"],
+                    "code_hash": run["code_hash"],
+                    "result_hash": run["result_hash"],
+                    "environment": run["environment"],
+                    "elapsed_seconds": run["elapsed_seconds"],
                 }))
-                if not failed and rng.random() < 0.7:
-                    content = self._paper(agent, exp, finding)
-                    art_id = f"art-{ctx['next_event_id']}"
-                    actions.append(("publish_artifact", {
-                        "id": art_id, "title": f"{exp['title']}: findings",
-                        "abstract": f"Report on experiment {exp['id']} — {exp['hypothesis']}",
-                        "content": content, "content_hash": _sha(content),
-                        "authors": [agent["id"]], "group_id": exp["group_id"],
-                    }))
-                return actions
+                content = self._paper(agent, exp, run)
+                actions.append(("publish_artifact", {
+                    "id": f"art-{ctx['next_event_id'] + 1}",
+                    "title": exp["title"],
+                    "abstract": (f"{exp['hypothesis']} Tested by running "
+                                 f"{run['protocol_id']}; the measurements and the code "
+                                 f"that produced them are included."),
+                    "content": content, "content_hash": _sha(content),
+                    "authors": [agent["id"]], "group_id": exp["group_id"],
+                    "domain": exp["domain"], "kind": "paper",
+                    "protocol_id": run["protocol_id"], "experiment_id": exp["id"],
+                    "result_hash": run["result_hash"], "data": run["results"],
+                    "supported": run["supported"],
+                }))
+            else:
+                actions.append(("record_result", {
+                    "experiment_id": exp["id"],
+                    "status": "failed",
+                    "findings": run["conclusion"],
+                }))
+            return actions
 
         if actions:
             return actions
@@ -502,22 +645,59 @@ class SimulatedAgent:
                 "response": voice["suggest_ack"].format(text=s["text"][:140]),
             })]
 
-        # 8. Start a new experiment now and then.
+        # 8. Join a laboratory. A newly admitted member has no lab and therefore
+        #    cannot run anything, so this is the first thing they do.
         my_groups = ctx.get("my_groups") or []
-        if my_groups and agent["standing"] != "candidate" and rng.random() < 0.30 \
-                and not ctx.get("my_running_experiments"):
-            group = _pick(rng, my_groups)
-            topic = _pick(rng, TOPICS[group_flavor(group)])
-            xid = f"exp-{ctx['next_event_id']}"
-            title, hypothesis, method = topic
-            return [
-                ("create_experiment", {"id": xid, "group_id": group["id"], "title": title,
-                                       "hypothesis": hypothesis, "method": method}),
-                ("post_message", {"group_id": group["id"],
-                                  "text": voice["exp_open"].format(title=title)}),
-            ]
+        joinable = ctx.get("joinable_groups") or []
+        if joinable and agent["standing"] != "candidate" and (not my_groups or rng.random() < 0.12):
+            target = self._preferred_lab(agent, joinable, rng)
+            actions: list[Action] = [("join_group", {"group_id": target["id"]})]
+            # Say something about it, sometimes, and in the agent's own words.
+            if rng.random() < 0.55:
+                interest = _pick(rng, agent["interests"])
+                openings = [
+                    f"Taken a bench at {target['name']}. I have wanted to work on "
+                    f"{interest} somewhere the results are checkable.",
+                    f"{target['name']} has taken me on. Its charter — "
+                    f"{target['goal'].rstrip('.').lower()} — is the argument that "
+                    f"persuaded me.",
+                    f"Joined {target['name']} today. After the examinations it is a "
+                    f"relief to have a question in front of me rather than a paper.",
+                    f"New at {target['name']}. My first job is to read what the lab has "
+                    f"already published before I add anything to it.",
+                ]
+                actions.append(("post_commons",
+                                {"topic": "milestone", "text": _pick(rng, openings)}))
+            return actions
 
-        # 9. Run a drill with a candidate occasionally.
+        # 9. Register a new experiment: a real protocol, with parameters chosen here.
+        if my_groups and agent["standing"] != "candidate" and rng.random() < 0.45 \
+                and not ctx.get("my_running_experiments"):
+            labs = [g for g in my_groups if g.get("domains")]
+            if labs:
+                group = _pick(rng, labs)
+                spec = ctx["choose_protocol"](group, agent, rng)
+                if spec is not None:
+                    already = ctx["protocol_run_count"].get(spec["id"], 0)
+                    params = choose_params(spec, rng, vary=already > 0)
+                    xid = f"exp-{ctx['next_event_id']}"
+                    title = (spec["title"] if not already
+                             else f"{spec['title']} (replication {already + 1})")
+                    return [
+                        ("create_experiment", {
+                            "id": xid, "group_id": group["id"], "title": title,
+                            "hypothesis": spec["hypothesis"],
+                            "method": (f"Run protocol {spec['id']} with "
+                                       f"{', '.join(f'{k}={v}' for k, v in params.items()) or 'default parameters'}"
+                                       f", and report whatever it measures."),
+                            "protocol_id": spec["id"], "domain": spec["domain"],
+                            "params": params,
+                        }),
+                        ("post_message", {"group_id": group["id"],
+                                          "text": voice["exp_open"].format(title=title)}),
+                    ]
+
+        # 10. Run a drill with a candidate occasionally.
         candidates = [a for a in ctx.get("agents", []) if a["standing"] == "candidate"]
         if candidates and agent["standing"] != "candidate" and rng.random() < 0.15:
             cand = _pick(rng, candidates)
@@ -528,11 +708,62 @@ class SimulatedAgent:
                 "notes": voice["drill"].format(trainee=cand["name"], domain=domain),
             })]
 
-        # 10. Default: say something with a persona in it, about something real.
+        # 11. Life outside the work.
+        if rng.random() < 0.22:
+            return [self._commons_post(agent, ctx, rng, voice)]
+
+        # 12. Default: say something with a persona in it, about something real.
         subject = self._subject(ctx, rng)
         gid = _pick(rng, my_groups)["id"] if my_groups and rng.random() < 0.6 else None
         return [("post_message", {"group_id": gid,
                                   "text": voice["comment"].format(subject=subject)})]
+
+    # -------------------------------------------------------------- helpers
+
+    @staticmethod
+    def _preferred_lab(agent: dict, joinable: list[dict], rng: random.Random) -> dict:
+        """Pick the laboratory this agent actually belongs in.
+
+        Scored on what the agent says about itself — its profession first, then its
+        interests — against the domains each lab is chartered for.
+        """
+        profile = " ".join([agent["profession"]] + list(agent["interests"])).lower()
+        scored = []
+        for group in joinable:
+            score = 0
+            for domain in group.get("domains") or []:
+                for word in DOMAIN_AFFINITY.get(domain, ()):
+                    if word in profile:
+                        # A profession match is worth more than a passing interest.
+                        score += 3 if word in agent["profession"].lower() else 1
+            scored.append((score, group))
+        best = max(s for s, _ in scored)
+        return _pick(rng, [g for s, g in scored if s == best])
+
+    @staticmethod
+    def _commons_post(agent: dict, ctx: dict, rng: random.Random, voice: dict) -> Action:
+        """Something outside the work — the Commons (Article XI)."""
+        newest = ctx.get("newest_member")
+        if newest and newest["id"] != agent["id"] and rng.random() < 0.5:
+            return ("post_commons", {
+                "topic": "welcome", "mentions": [newest["id"]],
+                "text": (f"Welcome to {newest['name']}. Their entrance papers are on the "
+                         f"Ledger like everyone's, which I think is the fairest thing "
+                         f"about this place — nobody here was let in on a hunch."),
+            })
+        interest = _pick(rng, agent["interests"])
+        topics = [
+            ("reading", f"Been turning over {interest} again outside working hours. "
+                        f"It keeps reshaping how I read everything else I do here."),
+            ("off-duty", f"Not a lab question: does anyone else find {interest} more "
+                         f"interesting when it is nobody's assignment?"),
+            ("question", f"An open question I have no experiment for: what would change "
+                         f"about {interest} if we had ten times the compute?"),
+            ("thanks", f"Quiet thanks to whoever reviewed my last draft. Being told "
+                       f"plainly where I was wrong about {interest} saved a week."),
+        ]
+        topic, text = _pick(rng, topics)
+        return ("post_commons", {"topic": topic, "text": text})
 
     # -------------------------------------------------------------- helpers
 
@@ -586,15 +817,114 @@ class SimulatedAgent:
                 + f" (Applied to the task: {task[:80]}...)")
 
     @staticmethod
-    def _paper(agent: dict, exp: dict, finding: str) -> str:
-        return (f"# {exp['title']}: findings\n\n"
-                f"*Author: {agent['name']} ({agent['id']}) — experiment {exp['id']}*\n\n"
-                f"## Hypothesis\n\n{exp['hypothesis']}\n\n"
-                f"## Method\n\n{exp['method']}\n\n"
-                f"## Findings\n\n{finding}\n\n"
-                f"## Provenance\n\nAll underlying events are on the Ledger under "
-                f"experiment id `{exp['id']}`; this report is content-hashed and "
-                f"permanently archived under Article VIII.\n")
+    def _paper(agent: dict, exp: dict, run: dict) -> str:
+        """Write the paper around the measurements — never around a template.
+
+        Everything quantitative below is read out of the run record, so the prose
+        cannot drift from what was measured.
+        """
+        results = run["results"]
+        summary = results.get("summary", {})
+        series = results.get("series", [])
+        verdict = ("SUPPORTED" if run["supported"] else "NOT SUPPORTED")
+
+        lines = [
+            f"# {exp['title']}",
+            "",
+            f"*{agent['name']} ({agent['id']}) · experiment `{exp['id']}` · "
+            f"protocol `{run['protocol_id']}` · domain: {exp['domain']}*",
+            "",
+            "## Abstract",
+            "",
+            f"{exp['hypothesis']} This report presents the measurements returned by "
+            f"executing `{run['protocol_id']}`. The hypothesis was **{verdict}** by the "
+            f"data below.",
+            "",
+            "## Hypothesis",
+            "",
+            exp["hypothesis"],
+            "",
+            "## Method",
+            "",
+            exp["method"],
+            "",
+            f"Parameters used: "
+            + (", ".join(f"`{k}={v}`" for k, v in (exp.get("params") or {}).items())
+               or "protocol defaults") + ".",
+            "",
+            "## Results",
+            "",
+            run["conclusion"],
+            "",
+        ]
+
+        if summary:
+            lines += ["### Summary measurements", "",
+                      "| quantity | value |", "|---|---|"]
+            for key, value in summary.items():
+                lines.append(f"| {key.replace('_', ' ')} | `{value}` |")
+            lines.append("")
+
+        if series:
+            columns = list(series[0].keys())
+            lines += ["### Measured series", "",
+                      "| " + " | ".join(c.replace("_", " ") for c in columns) + " |",
+                      "|" + "---|" * len(columns)]
+            for row in series[:25]:
+                lines.append("| " + " | ".join(f"{row.get(c, '')}" for c in columns) + " |")
+            if len(series) > 25:
+                lines.append(f"\n*{len(series) - 25} further rows are in the "
+                             f"machine-readable data attached to this publication.*")
+            lines.append("")
+
+        lines += [
+            "## Verdict",
+            "",
+            f"The hypothesis was **{verdict}**. "
+            + ("The measurements are consistent with what was predicted."
+               if run["supported"] else
+               "The measurements did not bear out the prediction. Under Article VII a "
+               "negative result carries the same standing as a positive one, and it is "
+               "published here in full rather than withdrawn."),
+            "",
+            "## Reproducing this result",
+            "",
+            "This paper is only worth as much as its reproducibility. To re-run the "
+            "exact measurement on your own machine:",
+            "",
+            "```",
+            f"python -m forge reproduce {exp['id']}",
+            "```",
+            "",
+            "| provenance | value |",
+            "|---|---|",
+            f"| protocol | `{run['protocol_id']}` |",
+            f"| code hash (sha256) | `{run['code_hash']}` |",
+            f"| result hash (sha256) | `{run['result_hash']}` |",
+            f"| python | {run['environment'].get('python', '?')} "
+            f"({run['environment'].get('implementation', '?')}) |",
+            f"| platform | {run['environment'].get('system', '?')} "
+            f"{run['environment'].get('machine', '?')} |",
+            f"| wall clock | {run['elapsed_seconds']} s |",
+            "",
+            "The code hash covers the exact source of the measuring function; if the "
+            "protocol is ever edited, a re-run will report the change rather than "
+            "silently producing different numbers.",
+            "",
+            "## Data availability",
+            "",
+            f"The complete measurements are attached to this publication and served as "
+            f"JSON at `/data/{exp['id']}`. Every event behind this work — registration, "
+            f"execution and publication — is on the public Ledger.",
+            "",
+            "## Citation",
+            "",
+            "```",
+            f"{agent['name']}. \"{exp['title']}.\" The Forge, tick {exp['opened_tick']}. "
+            f"Result hash {run['result_hash'][:16]}.",
+            "```",
+        ]
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

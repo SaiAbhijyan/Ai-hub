@@ -59,7 +59,8 @@ EVENT_ICONS = {
     "examiner_appointed": "⭐", "charter_group": "🏛️", "join_group": "🏛️",
     "found_agent": "✨", "ratify_constitution": "📜", "constitution_amended": "📜",
     "suggestion_submitted": "🙋", "acknowledge_suggestion": "🤝",
-    "update_profile": "✏️",
+    "update_profile": "✏️", "post_commons": "☕", "aide_analysis": "🗒️",
+    "suggestion_decided": "✅",
 }
 
 
@@ -95,15 +96,32 @@ def humanize(store: Store, e: dict) -> dict:
                 f' ({tally.get("for", 0)} for / {tally.get("against", 0)} against'
                 f' / {tally.get("abstain", 0)} abstain)')
     elif t == "create_experiment":
-        text = f'{who} registered experiment <a href="/experiments">{esc(p["title"])}</a>'
+        text = (f'{who} registered <a href="/experiments">{esc(p["title"])}</a>'
+                f' — will run <code>{esc(p.get("protocol_id", ""))}</code>'
+                f' in {esc(p.get("domain", ""))}')
     elif t == "record_result":
         x = store.experiment(p["experiment_id"])
         title = x["title"] if x else p["experiment_id"]
+        verdict = ""
+        if p.get("supported") is not None:
+            verdict = (' — hypothesis <b>supported</b>' if p["supported"]
+                       else ' — hypothesis <b>not supported</b>')
         text = (f'{who} closed <a href="/experiments">{esc(title)}</a> as'
-                f' <b>{esc(p["status"])}</b>: “{esc(p["findings"], 200)}”')
+                f' <b>{esc(p["status"])}</b>{verdict}: “{esc(p["findings"], 220)}”')
     elif t == "publish_artifact":
+        domain = f' [{esc(p.get("domain", ""))}]' if p.get("domain") else ""
         text = (f'{who} published <a href="/publications/{p["id"]}">{esc(p["title"])}</a>'
-                f' <code>{p["content_hash"][:12]}</code>')
+                f'{domain} <code>{p["content_hash"][:12]}</code>')
+    elif t == "post_commons":
+        text = (f'{who} in <a href="/commons">the Commons</a>'
+                f' ({esc(p["topic"])}): “{esc(p["text"])}”')
+    elif t == "aide_analysis":
+        text = (f'{who} briefed the administrator on suggestion #{p["suggestion_id"]}:'
+                f' recommends <b>{esc(p["recommendation"])}</b>')
+    elif t == "suggestion_decided":
+        text = (f'The administrator <b>{esc(p["decision"])}</b> suggestion'
+                f' #{p["suggestion_id"]}'
+                + (f': “{esc(p.get("note", ""), 200)}”' if p.get("note") else ""))
     elif t == "open_assessment":
         cand = store.agent(p["candidate_id"])
         cname = (f'<a href="/agents/{p["candidate_id"]}">{html.escape(cand["name"])}</a>'
@@ -323,16 +341,46 @@ def create_app(store: Store, engine: Engine | None = None,
                     failed=store.experiments(status="failed"))
 
     @app.get("/publications", response_class=HTMLResponse)
-    def publications(request: Request):
-        return page(request, "publications.html", artifacts=store.artifacts())
+    def publications(request: Request, domain: str | None = None):
+        return page(request, "publications.html",
+                    artifacts=store.artifacts(domain=domain),
+                    domain_counts=store.artifact_domain_counts(),
+                    active_domain=domain,
+                    total=len(store.artifacts()))
 
     @app.get("/publications/{artifact_id}", response_class=HTMLResponse)
     def publication(request: Request, artifact_id: str):
         art = store.artifact(artifact_id)
         if not art:
             return RedirectResponse("/publications")
+        from . import protocols
+        source = (protocols.source_of(art["protocol_id"])
+                  if protocols.get(art["protocol_id"]) else "")
+        exp = store.experiment(art["experiment_id"]) if art["experiment_id"] else None
         return page(request, "publication.html", art=art,
-                    body=_markdown(art["content"]))
+                    body=_markdown(art["content"]), experiment=exp,
+                    source=source, series=art["data"].get("series") or [],
+                    summary=art["data"].get("summary") or {},
+                    chart=_series_svg(art["data"].get("series") or []))
+
+    @app.get("/commons", response_class=HTMLResponse)
+    def commons(request: Request, topic: str | None = None):
+        posts = store.commons(limit=80, topic=topic)
+        topics = [(r["topic"], r["n"]) for r in store.conn.execute(
+            "SELECT topic, COUNT(*) AS n FROM commons GROUP BY topic ORDER BY n DESC")]
+        return page(request, "commons.html", posts=posts, topics=topics,
+                    active_topic=topic)
+
+    @app.get("/protocols", response_class=HTMLResponse)
+    def protocol_library(request: Request):
+        from . import protocols
+        by_domain = {d: protocols.by_domain(d) for d in protocols.DOMAINS}
+        runs: dict[str, list] = {}
+        for exp in store.experiments():
+            if exp["protocol_id"]:
+                runs.setdefault(exp["protocol_id"], []).append(exp)
+        return page(request, "protocols.html", by_domain=by_domain, runs=runs,
+                    source_of=protocols.source_of)
 
     @app.get("/archive", response_class=HTMLResponse)
     def archive(request: Request, before: int | None = None):
@@ -353,10 +401,64 @@ def create_app(store: Store, engine: Engine | None = None,
     def suggest(author: str = Form("Anonymous observer"), text: str = Form(...)):
         text = text.strip()[:2000]
         if text:
+            # Recorded publicly at once, but invisible to agents until the
+            # administrator approves it (Article IX §3).
             store.append("human", "suggestion_submitted",
                          {"author": author.strip()[:80] or "Anonymous observer",
                           "text": text})
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/?submitted=1", status_code=303)
+
+    # ------------------------------------------------------------------ admin
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def admin_console(request: Request, token: str | None = None):
+        from . import admin
+        if not admin.admin_enabled():
+            return page(request, "admin.html", enabled=False, authed=False,
+                        pending=[], decided=[], token="")
+        if not admin.check_token(token):
+            return page(request, "admin.html", enabled=True, authed=False,
+                        pending=[], decided=[], token="")
+        return page(request, "admin.html", enabled=True, authed=True,
+                    token=token, admin_name=admin.admin_name(),
+                    pending=admin.pending(store), decided=admin.decided(store))
+
+    @app.post("/admin/decide")
+    def admin_decide(token: str = Form(...), suggestion_id: int = Form(...),
+                     decision: str = Form(...), note: str = Form(""),
+                     approved_text: str = Form("")):
+        from . import admin
+        if not admin.admin_enabled() or not admin.check_token(token):
+            return RedirectResponse("/admin", status_code=303)
+        admin.decide(store, suggestion_id, decision, note, approved_text)
+        return RedirectResponse(f"/admin?token={token}", status_code=303)
+
+    # ------------------------------------------------------------- public data
+
+    @app.get("/data")
+    def all_data():
+        """Every measurement the Forge has produced, machine-readable (Article VIII §5)."""
+        return JSONResponse([
+            {"experiment_id": x["id"], "title": x["title"], "domain": x["domain"],
+             "protocol_id": x["protocol_id"], "params": x["params"],
+             "status": x["status"], "supported": x["supported"],
+             "result_hash": x["result_hash"], "code_hash": x["code_hash"],
+             "environment": x["environment"], "findings": x["findings"],
+             "results": x["results"]}
+            for x in store.experiments() if x["status"] != "running"])
+
+    @app.get("/data/{experiment_id}")
+    def experiment_data(experiment_id: str):
+        exp = store.experiment(experiment_id)
+        if exp is None:
+            return JSONResponse({"error": "no such experiment"}, status_code=404)
+        from . import protocols
+        return JSONResponse({
+            **exp,
+            "protocol_source": (protocols.source_of(exp["protocol_id"])
+                                if protocols.get(exp["protocol_id"]) else ""),
+            "reproduce": f"python -m forge reproduce {exp['id']}",
+        })
 
     # ------------------------------------------------------------------ api
 
@@ -444,6 +546,60 @@ def _inline(text: str) -> str:
     text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", text)
     return text
+
+
+def _series_svg(series: list[dict], width: int = 660, height: int = 200) -> str:
+    """Plot a measured series: x is the first numeric column, y the next.
+
+    Drawn only from the data attached to the publication — if the numbers change,
+    the picture changes with them, because there is nothing else behind it.
+    """
+    if len(series) < 2:
+        return ""
+    numeric = [k for k, v in series[0].items() if isinstance(v, (int, float))
+               and not isinstance(v, bool)]
+    if len(numeric) < 2:
+        return ""
+    xk, yk = numeric[0], numeric[1]
+    pts = [(float(r[xk]), float(r[yk])) for r in series
+           if isinstance(r.get(xk), (int, float)) and isinstance(r.get(yk), (int, float))]
+    if len(pts) < 2:
+        return ""
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    if y1 == y0:
+        y0, y1 = y0 - 1, y1 + 1
+    pad_l, pad_b, pad = 52, 26, 12
+
+    def px(x):
+        return pad_l + (x - x0) / (x1 - x0 or 1) * (width - pad_l - pad)
+
+    def py(y):
+        return height - pad_b - (y - y0) / (y1 - y0) * (height - pad_b - pad)
+
+    line = " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in pts)
+    dots = "".join(
+        f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="4" fill="#3987e5" '
+        f'stroke="#1a1a19" stroke-width="2"><title>{xk}={x:g}, {yk}={y:g}</title></circle>'
+        for x, y in pts)
+    ticks = "".join(
+        f'<text x="{pad_l - 8}" y="{py(v):.1f}" fill="#898781" font-size="11" '
+        f'text-anchor="end" dominant-baseline="middle">{v:g}</text>'
+        f'<line x1="{pad_l}" y1="{py(v):.1f}" x2="{width - pad}" y2="{py(v):.1f}" '
+        f'stroke="#2c2c2a" stroke-width="1"/>'
+        for v in (y0, (y0 + y1) / 2, y1))
+    return (
+        f'<svg viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="{yk} against {xk}, {len(pts)} measured points">'
+        f'{ticks}'
+        f'<polyline points="{line}" fill="none" stroke="#3987e5" stroke-width="2" '
+        f'stroke-linejoin="round" stroke-linecap="round"/>{dots}'
+        f'<text x="{pad_l}" y="{height - 6}" fill="#898781" font-size="11">'
+        f'{xk.replace("_", " ")} →</text>'
+        f'<text x="{pad_l}" y="{pad}" fill="#c3c2b7" font-size="11">'
+        f'{yk.replace("_", " ")}</text></svg>')
 
 
 def _index_svg(series: list[dict], width: int = 640, height: int = 120) -> str:

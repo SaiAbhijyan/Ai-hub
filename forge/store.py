@@ -23,6 +23,7 @@ DOMAINS = ["reasoning", "coding", "research", "communication", "coordination", "
 PROJECTION_TABLES = [
     "agents", "wgroups", "memberships", "messages", "proposals", "votes",
     "experiments", "assessments", "capabilities", "artifacts", "suggestions", "drills",
+    "commons", "aide_analyses",
 ]
 
 
@@ -191,10 +192,11 @@ class Store:
 
         elif t == "charter_group":
             c.execute(
-                "INSERT INTO wgroups (id, name, goal, charter, thresholds, founded_tick, status)"
-                " VALUES (?,?,?,?,?,?, 'active')",
+                "INSERT INTO wgroups (id, name, goal, charter, thresholds, domains, kind,"
+                " founded_tick, status) VALUES (?,?,?,?,?,?,?,?, 'active')",
                 (p["id"], p["name"], p["goal"], p["charter"],
-                 canonical(p.get("thresholds", {})), tick))
+                 canonical(p.get("thresholds", {})), canonical(p.get("domains", [])),
+                 p.get("kind", "group"), tick))
             for i, agent_id in enumerate(p.get("members", [])):
                 c.execute(
                     "INSERT OR IGNORE INTO memberships (group_id, agent_id, role, joined_tick)"
@@ -230,28 +232,42 @@ class Store:
         elif t == "create_experiment":
             c.execute(
                 "INSERT INTO experiments (id, group_id, author_id, title, hypothesis, method,"
-                " opened_tick, status) VALUES (?,?,?,?,?,?,?, 'running')",
+                " opened_tick, status, domain, protocol_id, params)"
+                " VALUES (?,?,?,?,?,?,?, 'running',?,?,?)",
                 (p["id"], p["group_id"], e["actor_id"], p["title"], p["hypothesis"],
-                 p["method"], tick))
+                 p["method"], tick, p.get("domain", ""), p.get("protocol_id", ""),
+                 canonical(p.get("params", {}))))
 
         elif t == "record_result":
-            c.execute("UPDATE experiments SET status=?, findings=?, closed_tick=? WHERE id=?",
-                      (p["status"], p["findings"], tick, p["experiment_id"]))
+            # Everything written here came back from an actual protocol run.
+            c.execute(
+                "UPDATE experiments SET status=?, findings=?, closed_tick=?, results=?,"
+                " supported=?, code_hash=?, result_hash=?, environment=?, elapsed_seconds=?"
+                " WHERE id=?",
+                (p["status"], p["findings"], tick, canonical(p.get("results", {})),
+                 1 if p.get("supported") else 0, p.get("code_hash", ""),
+                 p.get("result_hash", ""), canonical(p.get("environment", {})),
+                 float(p.get("elapsed_seconds", 0)), p["experiment_id"]))
 
         elif t == "open_assessment":
+            items = p.get("items", [])
             c.execute(
                 "INSERT INTO assessments (id, candidate_id, examiner_id, domain, tasks,"
-                " opened_tick, status) VALUES (?,?,?,?,?,?, 'open')",
+                " items, item_ids, opened_tick, status, sitting)"
+                " VALUES (?,?,?,?,?,?,?,?, 'open', ?)",
                 (p["id"], p["candidate_id"], e["actor_id"], p["domain"],
-                 json.dumps(p["tasks"]), tick))
+                 canonical(p["tasks"]), canonical(items),
+                 canonical([i["id"] for i in items]), tick, int(p.get("sitting", 1))))
 
         elif t == "submit_answers":
             c.execute("UPDATE assessments SET answers=?, status='answered' WHERE id=?",
-                      (json.dumps(p["answers"]), p["assessment_id"]))
+                      (canonical(p["answers"]), p["assessment_id"]))
 
         elif t == "grade_assessment":
-            c.execute("UPDATE assessments SET score=?, notes=?, status='graded', graded_tick=?"
-                      " WHERE id=?", (p["score"], p.get("notes", ""), tick, p["assessment_id"]))
+            c.execute("UPDATE assessments SET score=?, notes=?, marks=?, status='graded',"
+                      " graded_tick=? WHERE id=?",
+                      (p["score"], p.get("notes", ""), canonical(p.get("marks", [])),
+                       tick, p["assessment_id"]))
             row = c.execute("SELECT candidate_id, domain FROM assessments WHERE id=?",
                             (p["assessment_id"],)).fetchone()
             if row:
@@ -269,14 +285,45 @@ class Store:
         elif t == "publish_artifact":
             c.execute(
                 "INSERT INTO artifacts (id, title, abstract, content, content_hash, version,"
-                " supersedes, authors, group_id, tick) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " supersedes, authors, group_id, tick, domain, kind, protocol_id,"
+                " experiment_id, result_hash, data, supported)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (p["id"], p["title"], p["abstract"], p["content"], p["content_hash"],
-                 p.get("version", 1), p.get("supersedes"), json.dumps(p["authors"]),
-                 p.get("group_id"), tick))
+                 p.get("version", 1), p.get("supersedes"), canonical(p["authors"]),
+                 p.get("group_id"), tick, p.get("domain", ""), p.get("kind", "paper"),
+                 p.get("protocol_id", ""), p.get("experiment_id", ""),
+                 p.get("result_hash", ""), canonical(p.get("data", {})),
+                 None if p.get("supported") is None else (1 if p["supported"] else 0)))
+
+        elif t == "post_commons":
+            c.execute("INSERT INTO commons (event_id, agent_id, topic, text, mentions, tick)"
+                      " VALUES (?,?,?,?,?,?)",
+                      (e["id"], e["actor_id"], p["topic"], p["text"],
+                       canonical(p.get("mentions", [])), tick))
 
         elif t == "suggestion_submitted":
+            # Article IX as amended: nothing reaches the agents until the
+            # administrator has approved it.
             c.execute("INSERT INTO suggestions (event_id, author, text, tick, status)"
-                      " VALUES (?,?,?,?, 'new')", (e["id"], p["author"], p["text"], tick))
+                      " VALUES (?,?,?,?, 'pending_admin')",
+                      (e["id"], p["author"], p["text"], tick))
+
+        elif t == "aide_analysis":
+            c.execute(
+                "INSERT OR REPLACE INTO aide_analyses (event_id, suggestion_id, reading,"
+                " domains, constitution, cost, risks, recommendation, reasoning, tick)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (e["id"], p["suggestion_id"], p["reading"], canonical(p.get("domains", [])),
+                 p.get("constitution", ""), p.get("cost", ""), p.get("risks", ""),
+                 p.get("recommendation", ""), p.get("reasoning", ""), tick))
+
+        elif t == "suggestion_decided":
+            c.execute(
+                "UPDATE suggestions SET status=?, admin_note=?, decided_tick=?,"
+                " approved_text=? WHERE event_id=?",
+                ("new" if p["decision"] == "approved" else "rejected",
+                 p.get("note", ""), tick, p.get("approved_text", ""),
+                 p["suggestion_id"]))
 
         elif t == "acknowledge_suggestion":
             c.execute("UPDATE suggestions SET status='acknowledged', response=?, responder_id=?"
@@ -338,6 +385,7 @@ class Store:
     def _group_dict(row: sqlite3.Row) -> dict:
         d = dict(row)
         d["thresholds"] = json.loads(d["thresholds"])
+        d["domains"] = json.loads(d.get("domains") or "[]")
         return d
 
     def group_members(self, group_id: str) -> list[dict]:
@@ -355,7 +403,7 @@ class Store:
         rows = self.conn.execute(
             "SELECT g.*, m.role AS group_role FROM memberships m JOIN wgroups g ON g.id=m.group_id"
             " WHERE m.agent_id=? AND g.status='active' ORDER BY m.joined_tick", (agent_id,))
-        return [dict(r, thresholds=json.loads(r["thresholds"])) for r in rows]
+        return [dict(self._group_dict(r), group_role=r["group_role"]) for r in rows]
 
     def messages(self, group_id: str | None = None, limit: int = 50) -> list[dict]:
         if group_id is None:
@@ -393,7 +441,16 @@ class Store:
         return self.conn.execute("SELECT 1 FROM votes WHERE proposal_id=? AND agent_id=?",
                                  (pid, agent_id)).fetchone() is not None
 
-    def experiments(self, group_id: str | None = None, status: str | None = None) -> list[dict]:
+    @staticmethod
+    def _experiment_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        for field in ("params", "results", "environment"):
+            d[field] = json.loads(d.get(field) or "{}")
+        d["supported"] = None if d["supported"] is None else bool(d["supported"])
+        return d
+
+    def experiments(self, group_id: str | None = None, status: str | None = None,
+                    domain: str | None = None) -> list[dict]:
         q = "SELECT * FROM experiments"
         conds, args = [], []
         if group_id:
@@ -402,13 +459,39 @@ class Store:
         if status:
             conds.append("status=?")
             args.append(status)
+        if domain:
+            conds.append("domain=?")
+            args.append(domain)
         if conds:
             q += " WHERE " + " AND ".join(conds)
-        return [dict(r) for r in self.conn.execute(q + " ORDER BY opened_tick DESC", args)]
+        return [self._experiment_dict(r)
+                for r in self.conn.execute(q + " ORDER BY opened_tick DESC", args)]
 
     def experiment(self, xid: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM experiments WHERE id=?", (xid,)).fetchone()
-        return dict(row) if row else None
+        return self._experiment_dict(row) if row else None
+
+    def commons(self, limit: int = 60, agent_id: str | None = None,
+                topic: str | None = None) -> list[dict]:
+        q = "SELECT * FROM commons"
+        conds, args = [], []
+        if agent_id:
+            conds.append("agent_id=?")
+            args.append(agent_id)
+        if topic:
+            conds.append("topic=?")
+            args.append(topic)
+        if conds:
+            q += " WHERE " + " AND ".join(conds)
+        args.append(limit)
+        rows = self.conn.execute(q + " ORDER BY event_id DESC LIMIT ?", args)
+        return [dict(r, mentions=json.loads(r["mentions"])) for r in rows]
+
+    def aide_analysis(self, suggestion_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM aide_analyses WHERE suggestion_id=? ORDER BY event_id DESC LIMIT 1",
+            (suggestion_id,)).fetchone()
+        return dict(row, domains=json.loads(row["domains"])) if row else None
 
     def assessments(self, status: str | None = None, candidate_id: str | None = None,
                     examiner_id: str | None = None) -> list[dict]:
@@ -426,22 +509,50 @@ class Store:
         if conds:
             q += " WHERE " + " AND ".join(conds)
         rows = self.conn.execute(q + " ORDER BY opened_tick DESC", args)
-        return [dict(r, tasks=json.loads(r["tasks"]), answers=json.loads(r["answers"]))
-                for r in rows]
+        return [self._assessment_dict(r) for r in rows]
+
+    @staticmethod
+    def _assessment_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        for field, default in (("tasks", "[]"), ("answers", "[]"), ("items", "[]"),
+                               ("item_ids", "[]"), ("marks", "[]")):
+            d[field] = json.loads(d.get(field) or default)
+        return d
 
     def assessment(self, aid: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM assessments WHERE id=?", (aid,)).fetchone()
-        if not row:
-            return None
-        return dict(row, tasks=json.loads(row["tasks"]), answers=json.loads(row["answers"]))
+        return self._assessment_dict(row) if row else None
 
-    def artifacts(self) -> list[dict]:
-        rows = self.conn.execute("SELECT * FROM artifacts ORDER BY tick DESC")
-        return [dict(r, authors=json.loads(r["authors"])) for r in rows]
+    @staticmethod
+    def _artifact_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["authors"] = json.loads(d["authors"])
+        d["data"] = json.loads(d.get("data") or "{}")
+        d["supported"] = None if d["supported"] is None else bool(d["supported"])
+        return d
+
+    def artifacts(self, domain: str | None = None, kind: str | None = None) -> list[dict]:
+        q = "SELECT * FROM artifacts"
+        conds, args = [], []
+        if domain:
+            conds.append("domain=?")
+            args.append(domain)
+        if kind:
+            conds.append("kind=?")
+            args.append(kind)
+        if conds:
+            q += " WHERE " + " AND ".join(conds)
+        rows = self.conn.execute(q + " ORDER BY tick DESC", args)
+        return [self._artifact_dict(r) for r in rows]
 
     def artifact(self, aid: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM artifacts WHERE id=?", (aid,)).fetchone()
-        return dict(row, authors=json.loads(row["authors"])) if row else None
+        return self._artifact_dict(row) if row else None
+
+    def artifact_domain_counts(self) -> list[tuple[str, int]]:
+        return [(r["domain"], r["n"]) for r in self.conn.execute(
+            "SELECT domain, COUNT(*) AS n FROM artifacts WHERE domain != ''"
+            " GROUP BY domain ORDER BY n DESC")]
 
     def suggestions(self, status: str | None = None) -> list[dict]:
         q = "SELECT * FROM suggestions"

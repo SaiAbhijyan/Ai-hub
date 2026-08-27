@@ -1,10 +1,12 @@
-"""CLI: python -m forge {seed|run|tick|verify|rebuild}
+"""CLI: python -m forge {seed|run|tick|verify|rebuild|reproduce|protocols}
 
-  seed      run genesis on an empty Ledger
-  run       start the engine + web interface (seeds first if the Ledger is empty)
-  tick N    advance the engine N ticks and exit (default 1)
-  verify    re-walk the hash chain and report
-  rebuild   drop all projections and replay them from the chain
+  seed             run genesis on an empty Ledger
+  run              start the engine + web interface (seeds first if empty)
+  tick N           advance the engine N ticks and exit (default 1)
+  verify           re-walk the hash chain and report
+  rebuild          drop all projections and replay them from the chain
+  reproduce <id>   re-run a published experiment and check the numbers match
+  protocols        list the protocol library
 """
 
 from __future__ import annotations
@@ -42,6 +44,53 @@ def main(argv: list[str]) -> int:
         n = store.rebuild_projections()
         print(f"projections rebuilt from {n} events")
         return 0
+
+    if cmd == "protocols":
+        from . import protocols
+        for domain in protocols.DOMAINS:
+            specs = protocols.by_domain(domain)
+            if not specs:
+                continue
+            print(f"\n{domain.upper()}")
+            for spec in specs:
+                print(f"  {spec['id']:<28} {spec['title']}")
+                print(f"  {'':<28} {spec['question']}")
+        print()
+        return 0
+
+    if cmd == "reproduce":
+        if len(argv) < 2:
+            print("usage: python -m forge reproduce <experiment_id>")
+            return 2
+        exp = store.experiment(argv[1])
+        if exp is None:
+            print(f"no experiment '{argv[1]}' on the Ledger")
+            return 2
+        if not exp["protocol_id"]:
+            print(f"experiment {exp['id']} records no protocol; nothing to reproduce")
+            return 2
+
+        from .lab import reproduce as rerun
+        print(f"Reproducing {exp['id']}: {exp['title']}")
+        print(f"  protocol   {exp['protocol_id']}")
+        print(f"  parameters {exp['params']}")
+        print(f"  published  {exp['result_hash'][:32]}")
+        print("  re-running the protocol now...\n")
+        report = rerun(exp)
+        print(f"  re-run     {report['rerun_result_hash'][:32]}")
+        if not report["code_unchanged"]:
+            print("\n  ! The protocol source has changed since this was published,")
+            print("    so the numbers are expected to differ. The published code hash")
+            print("    is recorded on the Ledger for exactly this reason.")
+        if report["results_match"]:
+            print("\n  REPRODUCED: the re-run produced identical measurements.")
+            return 0
+        print("\n  NOT REPRODUCED: the measurements differ from those published.")
+        print(f"    published verdict: supported={report['original_supported']}")
+        print(f"    re-run verdict:    supported={report['rerun_supported']}")
+        if not report["rerun"]["ok"]:
+            print(f"    the re-run failed: {report['rerun'].get('error')}")
+        return 1
 
     if cmd == "tick":
         n = int(argv[1]) if len(argv) > 1 else 1

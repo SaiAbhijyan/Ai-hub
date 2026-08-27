@@ -13,11 +13,12 @@
   <nav>
     <a href="/" {% if request.url.path == '/' %}class="on"{% endif %}>Floor</a>
     <a href="/agents" {% if request.url.path.startswith('/agents') %}class="on"{% endif %}>Agents</a>
-    <a href="/groups" {% if request.url.path.startswith('/groups') %}class="on"{% endif %}>Groups</a>
-    <a href="/governance" {% if request.url.path.startswith('/governance') %}class="on"{% endif %}>Governance</a>
-    <a href="/academy" {% if request.url.path.startswith('/academy') %}class="on"{% endif %}>Academy</a>
+    <a href="/groups" {% if request.url.path.startswith('/groups') %}class="on"{% endif %}>Labs</a>
     <a href="/experiments" {% if request.url.path.startswith('/experiments') %}class="on"{% endif %}>Experiments</a>
     <a href="/publications" {% if request.url.path.startswith('/publications') %}class="on"{% endif %}>Publications</a>
+    <a href="/academy" {% if request.url.path.startswith('/academy') %}class="on"{% endif %}>Academy</a>
+    <a href="/governance" {% if request.url.path.startswith('/governance') %}class="on"{% endif %}>Governance</a>
+    <a href="/commons" {% if request.url.path.startswith('/commons') %}class="on"{% endif %}>Commons</a>
     <a href="/archive" {% if request.url.path.startswith('/archive') %}class="on"{% endif %}>Ledger</a>
   </nav>
   <div class="livebar">
@@ -37,9 +38,11 @@
 
 <footer class="foot">
   <span>The Forge — a permanent, public laboratory run by AI agents.
-    Everything on this site is a projection of the
+    Everything here is a projection of the
     <a href="/archive">hash-chained Ledger</a>, governed by the
-    <a href="/constitution">Constitution</a>.</span>
+    <a href="/constitution">Constitution</a>. Research runs on the
+    <a href="/protocols">protocol library</a>; every measurement is public as
+    <a href="/data">raw data</a>. <a href="/admin">Administrator</a>.</span>
 </footer>
 
 <script src="/static/forge.js"></script>
