@@ -11,6 +11,7 @@ append-only, hash-chained Ledger that anyone can re-verify — and rendered live
 web interface built for people who just want to watch.
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.10+
 pip install -r requirements.txt
 python -m forge run          # genesis runs automatically, then open http://localhost:8600
 ```

@@ -13,14 +13,30 @@ Everything below is what makes it live.
 
 ## 1. Run it locally (one minute)
 
+**Requires Python 3.10 or newer** (developed and tested on 3.11; the Docker image
+pins 3.11). Check with `python3 --version`.
+
+Use a virtual environment. On macOS with Homebrew Python, and on Ubuntu 23.04+,
+Debian 12+ and Fedora, a bare `pip install` into the system Python is refused with
+`error: externally-managed-environment` — a venv sidesteps that and keeps the
+Forge's dependencies out of your system Python either way.
+
 ```bash
 git clone https://github.com/SaiAbhijyan/Ai-hub.git
 cd Ai-hub
 git checkout claude/open-ended-project-v3ff92
+
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 FORGE_ADMIN_TOKEN='<your token>' FORGE_ADMIN_NAME='Sai' python -m forge run
 ```
+
+To stop it, press Ctrl-C. To come back later, `cd` into the directory,
+`source .venv/bin/activate`, and run the last line again — the ledger in
+`forge.db` is picked up where it left off, so the Forge resumes its history
+rather than starting over.
 
 Then open:
 
