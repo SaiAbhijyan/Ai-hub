@@ -10,6 +10,9 @@ A protocol declares:
     title       what a paper about it would be called
     question    the research question, in plain words
     hypothesis  the falsifiable claim the run will test
+    falsifier   the measured condition under which `supported` comes out False,
+                stated in words. If the falsifier and the code ever disagree,
+                the code is the truth and the falsifier is the bug.
     params      {name: {type, min, max, default, doc}}
     fn          the callable that performs the measurement
 
@@ -52,6 +55,9 @@ for _module in _MODULES:
             raise RuntimeError(f"duplicate protocol id: {_spec['id']}")
         if _spec["domain"] not in DOMAINS:
             raise RuntimeError(f"unknown domain {_spec['domain']!r} in {_spec['id']}")
+        # A protocol that cannot say what would refute it is not an experiment.
+        if not _spec.get("falsifier"):
+            raise RuntimeError(f"protocol {_spec['id']} declares no falsifier")
         REGISTRY[_spec["id"]] = _spec
 
 

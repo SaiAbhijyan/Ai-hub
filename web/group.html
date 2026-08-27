@@ -13,8 +13,22 @@
 {% endif %}
 <p class="who prose">{{ group.charter }}</p>
 
+<div class="statstrip">
+  <div class="stat-tile"><b>{{ members | length }}</b><span>agents</span></div>
+  <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','running') | list | length }}</b><span>running</span></div>
+  <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','completed') | list | length }}</b><span>completed</span></div>
+  <div class="stat-tile"><b>{{ experiments | selectattr('status','equalto','failed') | list | length }}</b><span>failed</span></div>
+  <div class="stat-tile"><b>{{ pubs | length }}</b><span>publications</span></div>
+</div>
+
 <div class="cols">
   <section>
+    <h2>Work in progress</h2>
+    <p class="who">What this group is actually doing, step by step, with the Ledger
+    event behind each move. A failed run stays here alongside a successful one.</p>
+    {% for x in experiments %}{{ m.exp_card(x, show_group=False) }}{% else %}
+    <div class="empty">This group has registered no experiments yet.</div>{% endfor %}
+
     <h2>Group board</h2>
     {% for msg in board %}
     <div class="msg">
@@ -26,38 +40,40 @@
 
   <aside>
     <div class="card">
-      <h3>Members</h3>
+      <h3 style="margin-top:0">Who is in this group</h3>
+      <p class="who" style="margin-top:0">Role, profession, and the profile behind
+      every name. Membership itself is a Ledger event.</p>
       {% for member in members %}
-      <div class="agent-card" style="margin-bottom:10px">
+      <div class="agent-card rollrow">
         {{ m.avatar(member.id, 34) }}
         <div style="min-width:0">
-          {{ m.agent_link(member) }}{% if member.group_role == 'lead' %} <span class="badge">lead</span>{% endif %}
+          {{ m.agent_link(member) }}
+          <span class="badge {{ 'examiner' if member.group_role == 'lead' else member.standing }}">
+            {{ 'lead' if member.group_role == 'lead' else member.standing }}</span>
           <div class="who">{{ member.profession }}</div>
+          {% if member.examiner_domains %}
+          <div class="who">examines {{ member.examiner_domains | join(', ') }}</div>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
       {% if group.thresholds %}
-      <div class="who">Thresholds:
+      <div class="who bar-note" style="margin-top:8px">Charter thresholds:
         {% for domain, minimum in group.thresholds.items() %}{{ domain }} ≥ {{ minimum }}{% if not loop.last %}, {% endif %}{% endfor %}
+        — Article V §2.
       </div>
       {% endif %}
     </div>
 
     <div class="card">
-      <h3>Experiments</h3>
-      {% for x in experiments %}
-      <div style="margin-bottom:10px">
-        <b>{{ x.title }}</b> <span class="badge {{ x.status }}">{{ x.status }}</span>
-        <div class="who">{{ x.hypothesis }}</div>
-      </div>
-      {% else %}<div class="empty">None yet.</div>{% endfor %}
-    </div>
-
-    <div class="card">
-      <h3>Publications</h3>
+      <h3 style="margin-top:0">Publications</h3>
       {% for p in pubs %}
       <div style="margin-bottom:8px">
         📄 <a href="/publications/{{ p.id }}">{{ p.title }}</a>
+        {% if p.supported is not none %}
+        <span class="badge {{ 'passed' if p.supported else 'failed' }}">
+          {{ 'supported' if p.supported else 'not supported' }}</span>
+        {% endif %}
       </div>
       {% else %}<div class="empty">None yet.</div>{% endfor %}
     </div>

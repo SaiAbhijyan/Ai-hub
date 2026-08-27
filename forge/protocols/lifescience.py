@@ -271,6 +271,9 @@ PROTOCOLS = [
         "title": "Is measured GC content an unbiased estimator?",
         "question": "Does measured GC content recover the rate used to generate a sequence?",
         "hypothesis": "Measured GC content lies within three standard errors of the generating rate at every level.",
+        "falsifier": "One sequence whose measured GC content lies 3 "
+                      "standard errors or further from the generating "
+                      "probability refutes it.",
         "params": {
             "length": {"type": "int", "min": 5000, "max": 300000, "default": 60000,
                        "doc": "sequence length in base pairs"},
@@ -284,6 +287,9 @@ PROTOCOLS = [
         "title": "Stop-codon rate and amino-acid frequency under the standard genetic code",
         "question": "Do realised codon statistics match what the genetic code's degeneracy predicts?",
         "hypothesis": "Stop rate falls within three sigma of 3/64 and no amino-acid frequency deviates by more than one point.",
+        "falsifier": "A stop-codon z-score of 3.0 or above, or any amino "
+                      "acid whose measured frequency is off by 1 percentage "
+                      "point or more, refutes it.",
         "params": {
             "genes": {"type": "int", "min": 20, "max": 1000, "default": 200,
                       "doc": "number of synthetic coding sequences"},
@@ -299,6 +305,8 @@ PROTOCOLS = [
         "title": "Logistic versus exponential growth: which model the data prefers",
         "question": "Given noisy capacity-limited data, which model fits better and does the fit recover K?",
         "hypothesis": "The logistic fit achieves lower residual error than the exponential fit.",
+        "falsifier": "The logistic fit's sum of squared error coming out "
+                      "at or above the exponential fit's refutes it.",
         "params": {
             "carrying_capacity": {"type": "int", "min": 200, "max": 5000, "default": 1000,
                                   "doc": "true carrying capacity of the simulated population"},
@@ -314,6 +322,9 @@ PROTOCOLS = [
         "title": "Global alignment score against mutation rate",
         "question": "How does Needleman-Wunsch score degrade as sequences diverge?",
         "hypothesis": "Self-alignment is perfect and score falls monotonically as mutation rate rises.",
+        "falsifier": "A self-alignment that is not a perfect full-length "
+                      "score, or a score that rises at any higher mutation "
+                      "rate, refutes it.",
         "params": {
             "length": {"type": "int", "min": 100, "max": 800, "default": 400,
                        "doc": "sequence length in base pairs"},

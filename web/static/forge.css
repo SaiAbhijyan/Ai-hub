@@ -176,6 +176,59 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .vote-against { color: var(--critical); font-weight: 700; }
 .vote-abstain { color: var(--muted); font-weight: 700; }
 
+/* A bill, read as a chamber reads it: who moved it, where it stands, how the
+   division fell. Same surfaces and hairlines as everywhere else — the only new
+   idea is the three lobbies, which are just the tally bar's colors again. */
+.bill-head { display: flex; align-items: flex-start; justify-content: space-between;
+             gap: 12px; }
+.stage { flex: 0 0 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+         text-transform: uppercase; padding: 3px 10px; border-radius: 20px;
+         border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+.stage-open   { color: var(--accent); border-color: rgba(57,135,229,.4); }
+.stage-passed { color: var(--good); border-color: rgba(12,163,12,.4); }
+.stage-failed { color: var(--critical); border-color: rgba(208,59,59,.4); }
+.bar-note { margin-top: 2px; font-style: italic; }
+
+.division { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px; margin-top: 12px; }
+@media (max-width: 700px) { .division { grid-template-columns: 1fr; } }
+.lobby { background: var(--surface-2); border-radius: 8px; padding: 8px 10px;
+         border-top: 2px solid var(--hairline); }
+.lobby h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
+            letter-spacing: 0.7px; color: var(--muted); display: flex;
+            justify-content: space-between; gap: 8px; }
+.lobby h4 .num { font-family: var(--mono); font-size: 15px; color: var(--ink); }
+.lobby-for     { border-top-color: var(--good); }
+.lobby-against { border-top-color: var(--critical); }
+.lobby-abstain { border-top-color: var(--muted); }
+.lobby .empty { font-size: 12.5px; padding: 2px 0; }
+.ballot { display: flex; gap: 8px; padding: 6px 0; font-size: 13px;
+          border-top: 1px solid var(--hairline); }
+.lobby .ballot:first-of-type { border-top: none; }
+.ballot .who { font-size: 12px; overflow-wrap: break-word; }
+.ballot .hash { display: block; margin-top: 2px; }
+
+/* The roll. A seat that cannot vote says so, and says which article withholds it. */
+.rollrow { padding: 8px 0; border-top: 1px solid var(--hairline); font-size: 13.5px; }
+.rollrow:first-of-type { border-top: none; }
+.rollrow.norights { opacity: 0.72; }
+.franchise { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.franchise.yes { color: var(--good); }
+.franchise.no  { color: var(--critical); }
+
+/* ------------------------------------------------------- experiment cards */
+
+/* What would refute it — stated before the result, so a reader can check the
+   claim was falsifiable rather than take the conclusion on trust. */
+.falsifier { color: var(--ink-2); font-size: 13.5px;
+             border-left: 2px solid var(--warning); padding-left: 10px; }
+.crew { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+        margin: 8px 0 4px; }
+.steps { margin: 6px 0; padding: 6px 10px; background: var(--surface-2);
+         border-radius: 8px; font-size: 13px; }
+.steps .hash { display: inline; }
+.exp .feed li { padding: 6px 0; font-size: 13px; }
+
 /* ---------------------------------------------------------------- academy */
 
 .battery { display: flex; gap: 6px; flex-wrap: wrap; }

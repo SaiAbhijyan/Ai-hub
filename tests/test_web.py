@@ -184,3 +184,169 @@ def test_markdown_escapes_html():
     assert "<h1>Hi</h1>" in out
     assert "<script>" not in out
     assert out.count("<li>") == 2
+
+
+# ------------------------------------------------- the Chamber, read as a chamber
+
+def test_governance_shows_bills_with_movers_and_thresholds(client, store):
+    """A human should be able to read /governance without reading the Ledger:
+    every bill names its mover, the article that sets its threshold, and where
+    the count stands."""
+    html = client.get("/governance").text
+    props = store.proposals()
+    assert props, "genesis should leave business before the Chamber"
+    for p in props[:4]:
+        assert p["title"] in html, p["title"]
+    assert "moved by" in html
+    assert "Threshold to carry" in html
+    assert "Article VI §5" in html
+
+
+def test_governance_roll_call_names_every_voter_and_their_reason(client, store):
+    """Names, not only counts — and the ledger event behind each ballot."""
+    html = client.get("/governance").text
+    found = 0
+    for p in store.proposals():
+        for ballot in store.votes_for(p["id"]):
+            voter = store.agent(ballot["agent_id"])
+            assert voter["name"] in html, voter["name"]
+            if ballot["reason"]:
+                # The stated reason is shown, not summarised away.
+                assert ballot["reason"][:40] in html.replace("&#39;", "'")
+            found += 1
+    assert found >= 3, "no ballots to check"
+    assert "ledger #" in html
+    assert 'href="/events/' in html
+
+
+def test_the_franchise_is_withheld_by_the_constitution_not_by_css(client, store):
+    """A candidate must appear unable to vote *because Article VI forbids it*.
+    The page has to say so in words, and the rule has to actually refuse."""
+    from forge.actions import validate
+
+    bars = {"candidate": "Article VI §4 — candidates hold no vote",
+            "aide": "Article IX §4 — the assistant holds no vote"}
+    html = client.get("/governance").text
+    barred = [a for a in store.agents() if a["standing"] in bars]
+    assert barred, "the roll should contain at least the administrator's aide"
+    openp = store.proposals(status="open")
+    for agent in barred:
+        assert agent["name"] in html, agent["name"]
+        assert bars[agent["standing"]] in html
+        # And the article, not the styling, is what stops the ballot.
+        if openp:
+            err = validate(store, agent["id"], "cast_vote",
+                           {"proposal_id": openp[0]["id"], "choice": "for"})
+            assert err and "may not" in err, err
+
+
+def test_governance_shows_roles_read_off_the_ledger(client, store):
+    html = client.get("/governance").text
+    for agent in store.agents():
+        if agent["examiner_domains"]:
+            assert agent["examiner_domains"][0] in html
+
+
+# --------------------------------------------- experiments, legible to a human
+
+def test_experiment_cards_name_the_owner_and_the_room(client, store):
+    html = client.get("/experiments").text
+    for x in store.experiments():
+        owner = store.agent(x["author_id"])
+        assert owner["name"] in html, owner["name"]
+    assert "Owner" in html
+    assert "In the room:" in html
+
+
+def test_experiment_cards_show_the_step_and_the_last_ledger_event(client, store):
+    html = client.get("/experiments").text
+    assert "registered at ledger #" in html
+    assert "last event #" in html
+    assert "read the raw event" in html
+    for x in store.experiments():
+        events = store.experiment_events(x["id"])
+        assert events, f"{x['id']} has no events behind it"
+        assert f"/events/{events[0]['id']}" in html
+
+
+def test_experiment_cards_state_what_would_refute_the_hypothesis(client, store):
+    html = client.get("/experiments").text
+    assert "What would refute it" in html
+    from forge import protocols
+    for x in store.experiments():
+        spec = protocols.get(x["protocol_id"])
+        assert spec and spec["falsifier"], x["protocol_id"]
+
+
+def test_failed_and_unsupported_runs_stay_on_the_board(client, store):
+    """Article VII §5: a refuted hypothesis is published, never withdrawn."""
+    html = client.get("/experiments").text
+    for x in store.experiments():
+        if x["supported"] == 0:
+            assert x["title"] in html, x["title"]
+            assert "not supported by the data" in html
+
+
+def test_group_page_lists_participants_and_experiment_status(client, store):
+    group = next(g for g in store.groups() if store.experiments(group_id=g["id"]))
+    html = client.get(f"/groups/{group['id']}").text
+    for member in store.group_members(group["id"]):
+        assert member["name"] in html, member["name"]
+        assert member["profession"] in html or member["group_role"] == "lead"
+    for x in store.experiments(group_id=group["id"]):
+        assert x["title"] in html
+        assert x["hypothesis"][:40] in html
+
+
+def test_a_ledger_event_page_serves_the_raw_record(client, store):
+    latest = store.events(limit=1)[0]
+    r = client.get(f"/events/{latest['id']}")
+    assert r.status_code == 200
+    assert latest["hash"] in r.text
+    assert latest["prev_hash"] in r.text
+    assert latest["action_type"] in r.text
+    assert client.get(f"/events/{store.event_count() + 500}").status_code == 404
+
+
+def test_public_json_serves_scorecards_and_examiner_names(client, store):
+    """The spec the Forge runs under: results, scorecards and examiner
+    identities are public — in a form a machine can read, not only a page."""
+    agents = client.get("/api/agents").json()
+    assert len(agents) == len(store.agents())
+    for row in agents:
+        stored = store.agent(row["id"])
+        assert row["capabilities"] == store.capabilities_current(row["id"])
+        assert row["examiner_domains"] == stored["examiner_domains"]
+    assert any(row["examiner_domains"] for row in agents)
+    assert any("experiment design" in row["examiner_domains"] for row in agents)
+    assert any("constitutional judgment" in row["examiner_domains"] for row in agents)
+
+    sittings = client.get("/api/assessments").json()
+    graded = [s for s in sittings if s["status"] == "graded"]
+    assert graded
+    for sitting in graded:
+        assert sitting["examiner"], sitting
+        assert sitting["candidate"], sitting
+        assert sitting["score"] is not None
+        # No agent grades its own paper — visible in the public record itself.
+        assert sitting["examiner_id"] != sitting["candidate_id"], sitting
+    # The founding papers name their marker honestly rather than leaving it blank.
+    founding = [s for s in graded if s["examiner_id"] == "forge"]
+    assert founding, "the founding examination should be in the public record"
+    assert all("Article IV §9" in s["examiner"] for s in founding)
+    assert any(s["score"] < 75 for s in graded), \
+        "a scorecard with no low marks is not a measurement"
+
+
+def test_academy_and_profiles_show_the_new_domains(client, store):
+    academy = client.get("/academy").text
+    agents_page = client.get("/agents").text
+    for domain in ("experiment design", "constitutional judgment"):
+        assert domain in academy, domain
+        assert domain in agents_page, domain
+    examiner = next(a for a in store.agents()
+                    if "constitutional judgment" in a["examiner_domains"])
+    profile = client.get(f"/agents/{examiner['id']}").text
+    assert "constitutional judgment" in profile
+    caps = store.capabilities_current(examiner["id"])
+    assert str(caps["constitutional judgment"]) in profile

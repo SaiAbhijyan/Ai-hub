@@ -169,6 +169,9 @@ PROTOCOLS = [
         "title": "Measured comparison counts for insertion sort and merge sort",
         "question": "Does observed comparison growth match the n^2 and n log n predictions?",
         "hypothesis": "Doubling n multiplies insertion-sort comparisons by about 4 and merge-sort comparisons by about 2, with both producing correct output.",
+        "falsifier": "Either sort returning a wrong order, an insertion-sort "
+                      "comparison ratio outside 3.2-4.8x per doubling, "
+                      "or a merge-sort ratio outside 1.9-2.6x, refutes it.",
         "params": {
             "max_size": {"type": "int", "min": 500, "max": 16000, "default": 2000,
                          "doc": "largest array size"},
@@ -182,6 +185,9 @@ PROTOCOLS = [
         "title": "Hash-table occupancy and collisions versus load factor",
         "question": "Do realised collision rates follow the balls-in-bins prediction?",
         "hypothesis": "Occupied-bucket fraction matches 1-exp(-load) within two points and collisions rise with load.",
+        "falsifier": "An occupancy differing from 1-exp(-load) by 2 points "
+                      "or more, or collisions failing to rise with load, "
+                      "refutes it.",
         "params": {
             "table_size": {"type": "int", "min": 256, "max": 65536, "default": 4096,
                            "doc": "number of buckets"},

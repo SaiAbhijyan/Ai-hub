@@ -252,3 +252,137 @@ def test_scores_on_the_ledger_equal_the_marked_paper(tmp_path):
     for a in graded:
         expected, _ = exams.mark(a["items"], a["answers"])
         assert a["score"] == expected, a["id"]
+
+
+# ------------------------------------------- the two domains added in v2.1
+
+def test_the_academy_measures_experiment_design_and_constitutional_judgment():
+    """Both are examinable domains with generated, computed-answer items —
+    not a judgement an examiner announces after a discussion."""
+    from forge import exams
+    from forge.store import DOMAINS
+
+    for domain in ("experiment design", "constitutional judgment"):
+        assert domain in DOMAINS
+        items = exams.generate(domain, f"asmt-{domain}")
+        assert len(items) >= 6
+        for item in items:
+            assert item["answer"] not in ("", None), item
+            assert item["prompt"].strip()
+        # A perfect paper marks 100 and a wrong one does not.
+        score, marks = exams.mark(items, [str(i["answer"]) for i in items])
+        assert score == 100, marks
+        score, marks = exams.mark(items, ["definitely not the answer"] * len(items))
+        assert score == 0, marks
+
+
+def test_a_resit_in_the_new_domains_is_a_different_paper():
+    from forge import exams
+
+    for domain in ("experiment design", "constitutional judgment"):
+        first = exams.generate(domain, "asmt-a")
+        second = exams.generate(domain, "asmt-b",
+                                exclude_ids={i["id"] for i in first})
+        assert {i["id"] for i in first}.isdisjoint({i["id"] for i in second})
+
+
+def test_every_domain_has_at_least_two_examiners_at_genesis(tmp_path):
+    """Article IV §8. The papers decide who passes, so this is a measurement of
+    the founding examination, not a promise the seed makes."""
+    from forge.seed import seed
+    from forge.store import DOMAINS, Store
+
+    store = Store(tmp_path / "forge.db")
+    seed(store)
+    by_domain = {d: [] for d in DOMAINS}
+    for agent in store.agents():
+        for domain in agent["examiner_domains"]:
+            by_domain[domain].append(agent["name"])
+    thin = {d: who for d, who in by_domain.items() if len(who) < 2}
+    assert not thin, thin
+
+
+def test_examinership_needs_a_measured_75_and_nothing_else(tmp_path):
+    """No founder is appointed in a domain its paper did not carry, and the bar
+    is still 75 — the number Article IV §4 has always set."""
+    from forge.seed import seed
+    from forge.store import Store
+
+    store = Store(tmp_path / "forge.db")
+    seed(store)
+    for agent in store.agents():
+        caps = store.capabilities_current(agent["id"])
+        for domain in agent["examiner_domains"]:
+            assert caps.get(domain, 0) >= 75, (agent["name"], domain, caps.get(domain))
+
+
+def test_the_first_examiners_of_the_new_domains_are_the_ones_who_earned_them(tmp_path):
+    from forge.seed import seed
+    from forge.store import Store
+
+    store = Store(tmp_path / "forge.db")
+    seed(store)
+    expected = {
+        "experiment design": {"Cassin Vane", "Lyra Ossett"},
+        "constitutional judgment": {"Wren Ashcombe", "Meridian Holt"},
+    }
+    for domain, names in expected.items():
+        holders = {a["name"] for a in store.agents()
+                   if domain in a["examiner_domains"]}
+        assert names <= holders, (domain, holders)
+
+
+def test_no_agent_grades_its_own_paper(tmp_path):
+    from forge.actions import validate
+    from forge.seed import seed
+    from forge.store import Store
+
+    store = Store(tmp_path / "forge.db")
+    seed(store)
+    examiner = next(a for a in store.agents(standing="examiner"))
+    domain = examiner["examiner_domains"][0]
+    err = validate(store, examiner["id"], "open_assessment",
+                   {"id": "a-self", "candidate_id": examiner["id"],
+                    "domain": domain, "tasks": ["t"]})
+    assert err and "may not assess itself" in err, err
+
+
+def test_founding_results_are_public_to_humans_and_to_agents(tmp_path):
+    """Article IV §9: the scorecard is on the Ledger, and the pages that agents
+    and humans both read serve it — including the papers that went badly."""
+    from fastapi.testclient import TestClient
+
+    from forge.seed import seed
+    from forge.server import create_app
+    from forge.store import Store
+
+    store = Store(tmp_path / "forge.db")
+    seed(store)
+    graded = [a for a in store.assessments(status="graded")]
+    assert graded, "the founding examination should have marked papers"
+    assert any(a["score"] < 75 for a in graded), \
+        "a founding cohort that never misses is not being measured"
+
+    with TestClient(create_app(store, engine=None)) as client:
+        academy = client.get("/academy").text
+        api = client.get("/api/agents").json()
+        for agent in store.agents():
+            caps = store.capabilities_current(agent["id"])
+            if not caps:
+                continue
+            assert agent["name"] in academy, agent["name"]
+            row = next(r for r in api if r["id"] == agent["id"])
+            assert row["capabilities"] == caps
+
+
+def test_every_protocol_declares_what_would_refute_it():
+    """Article VII §8. The library refuses a protocol without a falsifier, so
+    this checks the rule holds for everything actually registered."""
+    from forge import protocols
+
+    for pid, spec in protocols.REGISTRY.items():
+        falsifier = spec.get("falsifier", "")
+        assert falsifier and falsifier.strip(), pid
+        assert falsifier.rstrip().endswith("."), pid
+        # It must describe a measured condition, not restate the hypothesis.
+        assert falsifier != spec["hypothesis"], pid

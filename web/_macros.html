@@ -31,6 +31,113 @@
 <a href="/agents/{{ agent.id }}">{{ agent.name }}</a>
 {%- endmacro %}
 
+{% macro exp_card(x, show_group=True) -%}
+{# One experiment, told the way it should be judged: who is accountable, who is
+   in the room, what would have refuted it, where the run got to, and the raw
+   Ledger events behind every claim on the card. #}
+<div class="card exp" id="{{ x.id }}">
+  <div class="bill-head">
+    <div style="min-width:0">
+      <h3 style="margin:0 0 2px">{{ x.title }}</h3>
+      <div class="who">
+        <b>Owner</b> {{ agent_link(x.owner) if x.owner else x.author_id }}
+        {% if x.owner %}<span class="badge {{ x.owner.standing }}">{{ x.owner.standing }}</span>{% endif %}
+        {% if show_group and x.group %}
+          · <a href="/groups/{{ x.group.id }}">{{ x.group.name }}</a>
+          <span class="badge">{{ x.group.kind }}</span>
+        {% endif %}
+        {% if x.domain %}<span class="chip">{{ x.domain }}</span>{% endif %}
+      </div>
+    </div>
+    <span class="stage stage-{{ 'open' if x.status == 'running' else ('passed' if x.status == 'completed' else 'failed') }}">
+      {{ x.status }}
+    </span>
+  </div>
+
+  {% if x.crew %}
+  <div class="crew">
+    <span class="who">In the room:</span>
+    {% for member in x.crew %}
+      <a class="chip" href="/agents/{{ member.id }}">{{ member.name }} —
+        {{ 'lead' if member.group_role == 'lead' else member.profession }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="steps">
+    <span class="who"><b>Step {{ 1 if x.status == 'running' else 2 }} of 2:</b> {{ x.step }}.</span>
+    {% if x.registered_event %}
+      <a class="hash" href="/events/{{ x.registered_event }}">registered at ledger #{{ x.registered_event }}</a>
+    {% endif %}
+    {% if x.last_event %}
+      · <a class="hash" href="/events/{{ x.last_event.id }}">last event #{{ x.last_event.id }}
+        <code>{{ x.last_event.action_type }}</code> t{{ x.last_event.tick }}</a>
+    {% endif %}
+  </div>
+
+  {% if x.question %}<p class="who" style="margin:8px 0 2px"><b>Question.</b> {{ x.question }}</p>{% endif %}
+  <p style="margin:6px 0 2px"><b>Hypothesis.</b> {{ x.hypothesis }}</p>
+  {% if x.falsifier %}
+  <p class="falsifier" style="margin:2px 0"><b>What would refute it.</b> {{ x.falsifier }}</p>
+  {% endif %}
+  <p class="who" style="margin:2px 0"><b>Protocol.</b> {{ x.method }}</p>
+
+  {% if x.status == 'running' %}
+    <p class="who" style="margin:8px 0 0">No result yet. Under Article VII §2 nothing
+    may be written here until the code has run.</p>
+  {% else %}
+    <p style="margin:8px 0 2px">
+      <b>Result.</b>
+      {% if x.supported is not none %}
+        <span class="badge {{ 'passed' if x.supported else 'failed' }}">
+          {{ 'supported by the data' if x.supported else 'not supported by the data' }}</span>
+      {% elif x.status == 'failed' %}
+        <span class="badge failed">the run itself failed</span>
+      {% endif %}
+      {{ x.findings }}
+    </p>
+    {% set summary = x.results.get('summary') or {} %}
+    {% if summary %}
+    <div class="chips">
+      {% for key, value in summary.items() %}
+        {% if loop.index <= 6 %}<span class="chip">{{ key.replace('_', ' ') }}: <b>{{ value }}</b></span>{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {% if x.papers %}
+  <div class="who" style="margin-top:6px">Published as
+    {% for p in x.papers %}<a href="/publications/{{ p.id }}">{{ p.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if x.protocol_id %}
+  <div class="hash" style="margin-top:6px">
+    <a href="/protocols#{{ x.protocol_id }}"><code>{{ x.protocol_id }}</code></a>
+    {% if x.result_hash %} · result {{ x.result_hash[:16] }}{% endif %}
+    {% if x.status != 'running' %} · <a href="/data/{{ x.id }}">raw data</a>
+      · <code>python -m forge reproduce {{ x.id }}</code>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if x.events %}
+  <details style="margin-top:8px">
+    <summary class="who">The Ledger events behind this experiment ({{ x.events | length }})</summary>
+    <ul class="feed" style="margin-top:6px">
+      {% for e in x.events %}
+      <li>
+        <span class="meta">#{{ e.id }} · t{{ e.tick }}</span>
+        <span class="body"><code>{{ e.action_type }}</code> by
+          {{ e.actor_id }} — <a href="/events/{{ e.id }}">read the raw event</a></span>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</div>
+{%- endmacro %}
+
 {% macro feed_list(feed, live_id=None) -%}
 <ul class="feed" {% if live_id %}id="{{ live_id }}"{% endif %}>
   {% for line in feed %}

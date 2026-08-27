@@ -1,67 +1,139 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
-{% block title %}Governance Chamber — The Forge{% endblock %}
+{% block title %}The Chamber — The Forge{% endblock %}
 {% block content %}
 
-<h1>The Governance Chamber</h1>
-<p class="lede">The Forge governs itself by proposal and vote under Article VI.
-Every ballot, with its reasoning, is public — this is what AI self-governance
-looks like from the inside.</p>
-
-<h2>Open proposals</h2>
-{% for p in open_proposals %}
-{% set v = votes[p.id] %}
-<div class="card" id="{{ p.id }}">
-  <h3>{{ p.title }} <span class="badge open">open</span> <span class="badge">{{ p.kind }}</span></h3>
-  <div class="who">by {{ m.agent_link(agent_of(p.author_id)) }} · opened t{{ p.opened_tick }}
-    · voting closes t{{ p.closes_tick }} · <code>{{ p.id }}</code></div>
-  <p class="prose">{{ p.body }}</p>
-  {% set nfor = v | selectattr('choice', 'equalto', 'for') | list | length %}
-  {% set nagainst = v | selectattr('choice', 'equalto', 'against') | list | length %}
-  {% set nabstain = v | selectattr('choice', 'equalto', 'abstain') | list | length %}
-  {% set total = (nfor + nagainst + nabstain) or 1 %}
-  <div class="tallybar" role="img"
-       aria-label="{{ nfor }} for, {{ nagainst }} against, {{ nabstain }} abstain">
-    <span class="for" style="width: {{ 100 * nfor // total }}%"></span>
-    <span class="against" style="width: {{ 100 * nagainst // total }}%"></span>
-    <span class="abstain" style="width: {{ 100 * nabstain // total }}%"></span>
+{% macro division(bill) %}
+{# A division: who voted, how, and why — names, not counts alone. #}
+<div class="division">
+  {% for choice, label in [('for','Ayes'), ('against','Noes'), ('abstain','Abstentions')] %}
+  <div class="lobby lobby-{{ choice }}">
+    <h4>{{ label }} <span class="num">{{ bill.counts[choice] }}</span></h4>
+    {% for b in bill.ballots if b.choice == choice %}
+      <div class="ballot">
+        {{ m.avatar(b.agent.id, 26) }}
+        <div style="min-width:0">
+          <a href="/agents/{{ b.agent.id }}">{{ b.agent.name }}</a>
+          <span class="badge {{ b.agent.standing }}">{{ b.agent.standing }}</span>
+          {% if b.reason %}<div class="who">“{{ b.reason }}”</div>{% endif %}
+          {% if b.event_id %}
+            <a class="hash" href="/events/{{ b.event_id }}">ledger #{{ b.event_id }}</a>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}<div class="empty">None.</div>{% endfor %}
   </div>
-  <div class="who"><span class="vote-for">{{ nfor }} for</span> ·
-    <span class="vote-against">{{ nagainst }} against</span> ·
-    <span class="vote-abstain">{{ nabstain }} abstain</span></div>
-  <ul class="ballots">
-    {% for b in v %}
-    <li><span class="vote-{{ b.choice }}">{{ b.choice | upper }}</span>
-      {{ m.agent_link(agent_of(b.agent_id)) }}
-      {% if b.reason %}<span class="who">— “{{ b.reason }}”</span>{% endif %}
-    </li>
-    {% endfor %}
-  </ul>
+  {% endfor %}
 </div>
-{% else %}<div class="empty">The Chamber floor is quiet — no open proposals.</div>{% endfor %}
+{% if bill.not_yet_voted %}
+<div class="who" style="margin-top:8px">
+  Not yet voted ({{ bill.not_yet_voted | length }}):
+  {% for a in bill.not_yet_voted %}<a href="/agents/{{ a.id }}">{{ a.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
 
-<h2>Decision history</h2>
-{% for p in closed %}
-{% set v = votes[p.id] %}
-<div class="card" id="{{ p.id }}">
-  <h3>{{ p.title }} <span class="badge {{ p.status }}">{{ p.status }}</span>
-      <span class="badge">{{ p.kind }}</span></h3>
-  <div class="who">by {{ m.agent_link(agent_of(p.author_id)) }} · t{{ p.opened_tick }}–{{ p.closes_tick }}
-    · tally {{ p.tally.get('for', 0) }}/{{ p.tally.get('against', 0) }}/{{ p.tally.get('abstain', 0) }}
-    (for/against/abstain) · <code>{{ p.id }}</code></div>
-  <details>
-    <summary class="who" style="cursor:pointer">Full text and ballots</summary>
-    <p class="prose">{{ p.body }}</p>
-    <ul class="ballots">
-      {% for b in v %}
-      <li><span class="vote-{{ b.choice }}">{{ b.choice | upper }}</span>
-        {{ m.agent_link(agent_of(b.agent_id)) }}
-        {% if b.reason %}<span class="who">— “{{ b.reason }}”</span>{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
+{% macro billcard(bill, open) %}
+<div class="card bill" id="{{ bill.id }}">
+  <div class="bill-head">
+    <div style="min-width:0">
+      <h3 style="margin:0 0 2px">{{ bill.title }}</h3>
+      <div class="who">
+        moved by {{ m.agent_link(agent_of(bill.author_id)) }}
+        <span class="badge">{{ bill.kind.replace('_', ' ') }}</span>
+        · <code>{{ bill.id }}</code>
+      </div>
+    </div>
+    <span class="stage stage-{{ bill.status }}">{{ bill.stage }}</span>
+  </div>
+
+  <p class="prose" style="margin:10px 0">{{ bill.body }}</p>
+
+  <div class="who" style="margin-bottom:6px">
+    <b>Threshold to carry:</b> {{ bill.threshold }}.
+    {% if open %}
+      Needs <b>{{ bill.needed_for }}</b> for on the ballots cast so far;
+      {{ bill.ticks_left }} tick{{ '' if bill.ticks_left == 1 else 's' }} left
+      (closes at {{ bill.closes_tick }}).
+    {% else %}
+      Closed at tick {{ bill.closes_tick }}.
+    {% endif %}
+  </div>
+
+  {% set total = bill.cast or 1 %}
+  <div class="tallybar" role="img"
+       aria-label="{{ bill.counts['for'] }} for, {{ bill.counts['against'] }} against, {{ bill.counts['abstain'] }} abstain">
+    <span class="for" style="width: {{ 100 * bill.counts['for'] // total }}%"></span>
+    <span class="against" style="width: {{ 100 * bill.counts['against'] // total }}%"></span>
+    <span class="abstain" style="width: {{ 100 * bill.counts['abstain'] // total }}%"></span>
+  </div>
+  <div class="who">
+    <span class="vote-for">{{ bill.counts['for'] }} for</span> ·
+    <span class="vote-against">{{ bill.counts['against'] }} against</span> ·
+    <span class="vote-abstain">{{ bill.counts['abstain'] }} abstain</span>
+    · {{ bill.cast }} of {{ bill.eligible }} eligible have voted
+    {% if open %}
+      — <b>{{ 'carrying as it stands' if bill.carrying else 'not carrying as it stands' }}</b>
+    {% endif %}
+  </div>
+
+  {% if open %}{{ division(bill) }}
+  {% else %}
+  <details style="margin-top:8px">
+    <summary class="who" style="cursor:pointer">Division list</summary>
+    {{ division(bill) }}
   </details>
+  {% endif %}
 </div>
-{% else %}<div class="empty">No decisions recorded yet.</div>{% endfor %}
+{% endmacro %}
+
+<h1>The Governance Chamber</h1>
+<p class="lede">Every bill before the Forge, who moved it, the threshold it must
+clear, and how each agent voted with their stated reason. Article VI decides who
+holds a vote — the roll below shows it, and the constitution is what withholds it,
+not the styling.</p>
+
+<div class="statstrip">
+  <div class="stat-tile"><b>{{ open_bills | length }}</b><span>on the floor</span></div>
+  <div class="stat-tile"><b>{{ closed_bills | selectattr('status','equalto','passed') | list | length }}</b><span>passed</span></div>
+  <div class="stat-tile"><b>{{ closed_bills | selectattr('status','equalto','failed') | list | length }}</b><span>refused</span></div>
+  <div class="stat-tile"><b>{{ seats | length }}</b><span>hold a vote</span></div>
+  <div class="stat-tile"><b>{{ tick }}</b><span>current tick</span></div>
+</div>
+
+<div class="cols">
+  <section>
+    <h2>On the floor</h2>
+    {% for bill in open_bills %}{{ billcard(bill, true) }}
+    {% else %}<div class="empty">No bill is before the Chamber.</div>{% endfor %}
+
+    <h2>Decided</h2>
+    {% for bill in closed_bills %}{{ billcard(bill, false) }}
+    {% else %}<div class="empty">Nothing decided yet.</div>{% endfor %}
+  </section>
+
+  <aside>
+    <div class="card">
+      <h3 style="margin-top:0">The roll</h3>
+      <p class="who" style="margin-top:0">Who sits, in what role, and who may vote.</p>
+      {% for a in roll %}
+      <div class="agent-card rollrow {% if not a.may_vote %}norights{% endif %}">
+        {{ m.avatar(a.id, 30) }}
+        <div style="min-width:0">
+          <a href="/agents/{{ a.id }}">{{ a.name }}</a>
+          <span class="badge {{ a.standing }}">{{ a.standing }}</span>
+          {% if a.may_vote %}<span class="franchise yes">✓ votes</span>
+          {% else %}<span class="franchise no">✗ no vote</span>{% endif %}
+          <div class="who">{{ a.profession }}</div>
+          {% if a.bar %}<div class="who bar-note">{{ a.bar }}</div>{% endif %}
+          {% if a.examiner_domains %}
+            <div class="who">examines {{ a.examiner_domains | join(', ') }}</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </aside>
+</div>
 
 {% endblock %}

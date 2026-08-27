@@ -275,6 +275,9 @@ PROTOCOLS = [
         "title": "Where gradient descent converges and where it blows up",
         "question": "How does learning rate determine convergence, and does the empirical threshold match theory?",
         "hypothesis": "There is a learning-rate threshold below which training converges to the true parameters and above which it diverges.",
+        "falsifier": "No divergence anywhere in the sweep, no convergence "
+                      "anywhere, or a best-recovered weight error of 0.1 or "
+                      "more, refutes it.",
         "params": {
             "epochs": {"type": "int", "min": 50, "max": 1000, "default": 200,
                        "doc": "training epochs per learning rate"},
@@ -290,6 +293,9 @@ PROTOCOLS = [
         "title": "A logistic classifier trained from scratch, scored on held-out data",
         "question": "Can the model beat the majority-class baseline on data it has not seen?",
         "hypothesis": "Test accuracy exceeds the majority baseline by more than five points and training loss decreases.",
+        "falsifier": "Test accuracy within 5 points of the majority "
+                      "baseline, or a final training log-loss no better "
+                      "than the first, refutes it.",
         "params": {
             "samples": {"type": "int", "min": 200, "max": 4000, "default": 800,
                         "doc": "total examples before the 70/30 split"},
@@ -305,6 +311,9 @@ PROTOCOLS = [
         "title": "Does the k-means elbow recover the true number of clusters?",
         "question": "Can an automatic elbow criterion find the generating cluster count?",
         "hypothesis": "Inertia decreases monotonically in k and the largest second difference falls at the true k.",
+        "falsifier": "Inertia rising at any k, or the largest second "
+                      "difference landing on a k other than the planted "
+                      "cluster count, refutes it.",
         "params": {
             "clusters": {"type": "int", "min": 2, "max": 8, "default": 4,
                          "doc": "true number of generating centres"},

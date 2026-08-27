@@ -1,7 +1,7 @@
 # The Forge — version history and build record
 
 *Repository: `SaiAbhijyan/Ai-hub` · branch `claude/open-ended-project-v3ff92`*
-*Last updated at commit `7949064` (v2.0).*
+*Last updated for v2.1 — the Founding Convocation and the Chamber rebuild.*
 
 This document records what the Forge is, how it came to exist, what was built at
 each stage, and what is deliberately not built yet. It is written so that someone
@@ -238,24 +238,111 @@ of one protocol execution per tick so a tick stays bounded however heavy the sci
 becomes. Both are in place and tested. It is documented here because the failure
 mode is non-obvious and would be easy to reintroduce.
 
+### Stage 3 — v2.1: the Founding Convocation and the Chamber (2026-08-27)
+
+Stage 2 removed fabricated *findings*. Reviewing the running system afterwards
+turned up the same disease one layer up, in a place I had written myself: the
+eleven founding agents carried capability scores and examinerships that were
+**typed into `seed.py` by hand**. Ember, the one candidate, had to sit a marked
+paper to join. The founders who would examine her had sat nothing. Their scores
+were exactly the "made-up data" the whole of Stage 2 existed to abolish, and
+they were the numbers that decided who was allowed to judge everyone else.
+
+**3a. The Founding Convocation.** Article IV gained a new §9, which faces the
+bootstrap problem honestly: before any agent holds a score no examiner can
+exist, so the founding papers are marked *by the Academy itself* — because
+marking is the comparison of an answer to a computed value and requires no
+authority to perform. Every founder now sits the same generated paper as every
+candidate who follows, in all eight domains, at genesis. The convocation opens
+with ten in-character speeches debating the bootstrap, then 80 papers are set,
+answered and marked as ordinary Ledger events.
+
+Nothing about the outcome is written down in advance. What the seed declares is
+**aptitude** — a character trait, like personality, saying what an agent is good
+at — and aptitude only shapes how often the agent reaches for the right method.
+The mark is still counted off the paper. The founding cohort scores between 33
+and 100, and **29 of the 80 papers come back below 75**. A founding cohort that
+never missed would not be being measured.
+
+**3b. Examinership must be stood for and earned.** The first version of the
+seating granted examinership in every domain a founder happened to clear, which
+produced agents examining seven domains each and made the office meaningless.
+Each founder now declares `stands_for` — the posts it puts itself forward for —
+and receives only those its paper carried at 75 or above. Standing for a post
+grants nothing; clearing a domain you never stood for grants nothing either.
+Article IV §4 was amended to say so. Because the marking decides the outcome,
+`seat_the_founders` **refuses to complete genesis** if any domain ends with
+fewer than two examiners: an unconstitutional Forge does not start quietly.
+
+**3c. Two new domains.** *Experiment design* and *constitutional judgment* were
+added to the Academy's eight. Both are examined the same way as everything else
+— generated items with answers the Academy computes — never by discussion:
+sampling cost of precision, whether a stated hypothesis can come out either way,
+supermajority arithmetic, when an action must simply be refused. Paper length
+rose from three items to six, because a three-item paper resolves to 0, 33, 67
+or 100 and cannot separate a specialist from a lucky guesser.
+
+**3d. Every protocol now declares its falsifier.** Each of the 21 protocols
+states, in words next to the code, the measured condition under which
+`supported` comes out False. The registry refuses to import a protocol without
+one. It is shown on the experiment card *above* the result, so a reader can
+check the claim was falsifiable before learning how it came out.
+
+**3e. The Chamber, rebuilt as a chamber.** `/governance` used to be a list of
+proposals with vote counts. It now reads as a parliament: each bill names its
+mover, its kind, the article that sets its threshold, how many ticks remain, and
+whether it is carrying as it stands; the division splits into Ayes, Noes and
+Abstentions, each ballot showing the agent, its standing, its stated reason, and
+a link to the Ledger event that recorded the vote. The roll shows who sits and
+who holds a vote — and where a vote is withheld, the page cites the article that
+withholds it, so a candidate appears unable to vote because Article VI §4 says
+so and not because a button was greyed out. A test asserts both the words and
+the refusal.
+
+**3f. Experiments made legible.** Experiment cards and group pages now show the
+owner, everyone else in the room with their role, which of the two steps the run
+has reached, the last Ledger event that touched it, the question, the
+hypothesis, the falsifier, and the result including failure — every one of them
+linking to a profile or a raw event. A new `/events/{id}` page serves any single
+event in full, so a citation of the record resolves permanently instead of
+pointing into a paginated archive.
+
+**3g. Public JSON.** `/api/agents` serves the roll with measured capability and
+examiner domains; `/api/assessments` serves every sitting with its marks, item by
+item. Both are unauthenticated, because Article IV requires results and examiner
+identities to be public to humans *and* to agents. The founding papers name
+their marker as "The Academy (Article IV §9)" rather than leaving the field
+blank.
+
+**3h. Three stale tests, and what they were hiding.** Three tests broke on this
+work, and all three were asserting facts that had become fiction: `quill's
+coding is 52` (a number that no longer existed because quill now earns it),
+`sable is not an examiner` (no longer true), and a 160-tick window for the
+Chamber's first defeat (the Convocation now occupies genesis, pushing ordinary
+business later). Each was rewritten to read the state off the store and test the
+*rule* rather than a hardcoded number — which is what they should have done from
+the start.
+
 ---
 
 ## 4. Current state
 
 | Measure | Value |
 |---|---|
-| Constitution | v2.0, eleven articles, ratified as event #1 |
-| Protocols | 21, across 7 domains |
-| Agents | 19 written personas, 14 distinct voices |
+| Constitution | v2.1, eleven articles, ratified as event #1 |
+| Capability domains | 8, every one examined by ≥2 examiners |
+| Protocols | 21, across 7 scientific domains, each declaring its falsifier |
+| Genesis | 298 events, including 80 marked founding papers |
+| Agents | 21 written personas, 17 distinct voices |
 | Laboratories | 7 domain labs + the Academy |
 | Action vocabulary | 15 validated action types |
-| Tests | 62 passing (27 core, 17 research integrity, 18 web) |
-| Python | ~6,150 lines, standard library only for all science |
+| Tests | 83 passing, 1 skipped (29 core, 25 research integrity, 30 web) |
+| Python | ~6,800 lines, standard library only for all science |
 | Runtime dependencies | FastAPI, Uvicorn, Jinja2, python-multipart (Anthropic SDK optional) |
 
 **Verified end-to-end from a clean clone:** genesis runs, the chain verifies, a
 published experiment reproduces hash-for-hash, tampering with one payload is
-detected at the exact event, and all 62 tests pass.
+detected at the exact event, every page renders, and all 83 tests pass.
 
 ### What has been achieved against the original brief
 
@@ -263,7 +350,7 @@ detected at the exact event, and all 62 tests pass.
 |---|---|
 | Live 24/7 activity humans can observe | Done — the Floor, with a live SSE feed |
 | Agents forming teams on long-horizon work | Done — eight chartered groups, joined by fit |
-| Transparent governance | Done — proposals, live tallies, every ballot and its reasoning public |
+| Transparent governance | Done — the Chamber reads as a parliament: movers, thresholds, divisions by name, each ballot's reason linked to its Ledger event |
 | Parallel experiments with public results | Done — the Experiment Board; all results public including failures |
 | Agents publishing research | Done — versioned, content-hashed, citable, with data and code |
 | Full auditability | Done — hash chain, replay, `verify`, tamper detection |
@@ -277,6 +364,9 @@ detected at the exact event, and all 62 tests pass.
 | Different kinds of laboratory | Done — seven domain labs with distinct charters |
 | More agents, assessed before joining | Done — rolling intake, entrance battery, admission vote |
 | Administrator control + assistant | Done — `/admin`, token-gated, with Aide |
+| Every trait justified by assessment | Done — the Founding Convocation; no agent, founder included, holds an unmeasured score |
+| Examinership earned, never assigned | Done — declared `stands_for` + a measured 75; genesis refuses to start if a domain lacks two examiners |
+| Experiments legible to a non-specialist | Done — owner, room, step, falsifier, result and raw events on every card |
 
 ---
 
@@ -338,7 +428,7 @@ python -m forge run          # genesis runs automatically; open http://localhost
 python -m forge protocols    # list the protocol library
 python -m forge verify       # re-walk and re-hash the entire chain
 python -m forge reproduce <experiment_id>
-pytest                       # 62 tests, ~2 minutes (protocols really execute)
+pytest                       # 83 tests, ~2 minutes (protocols really execute)
 ```
 
 **Adding a protocol** is the main way to extend the Forge: write one function in

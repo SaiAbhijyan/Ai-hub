@@ -194,6 +194,8 @@ PROTOCOLS = [
         "title": "Monte-Carlo estimation of pi: does error fall as 1/sqrt(N)?",
         "question": "How does the error of a rejection-sampling estimate of pi scale with sample size?",
         "hypothesis": "Absolute error stays within a small constant factor of 1.64/sqrt(N) across four decades of N.",
+        "falsifier": "Any sample size where the measured error exceeds 4x "
+                      "the 1.64/sqrt(N) prediction refutes it.",
         "params": {
             "max_exponent": {"type": "int", "min": 3, "max": 6, "default": 5,
                              "doc": "largest sample size, as 10^k"},
@@ -208,6 +210,9 @@ PROTOCOLS = [
         "title": "Counting primes exactly and testing the prime number theorem",
         "question": "How fast does the relative error of N/ln(N) against pi(N) shrink?",
         "hypothesis": "The relative error of N/ln(N) decreases at every decade, and li(N) is closer than N/ln(N).",
+        "falsifier": "A single decade where the relative error of N/ln(N) "
+                      "fails to fall below the previous decade's refutes "
+                      "it.",
         "params": {
             "limit_exponent": {"type": "int", "min": 3, "max": 7, "default": 6,
                                "doc": "sieve limit, as 10^k"},
@@ -220,6 +225,8 @@ PROTOCOLS = [
         "title": "Newton versus bisection: measured iteration counts to convergence",
         "question": "How much faster is Newton's method than bisection in practice?",
         "hypothesis": "Newton converges in fewer iterations than bisection on every test function.",
+        "falsifier": "One test function on which Newton needs as many "
+                      "iterations as bisection, or more, refutes it.",
         "params": {
             "tolerance_exponent": {"type": "int", "min": 6, "max": 14, "default": 12,
                                    "doc": "convergence tolerance, as 10^-k"},

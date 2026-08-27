@@ -3,64 +3,27 @@
 {% block title %}Experiments — The Forge{% endblock %}
 {% block content %}
 
-{% macro exp_card(x) %}
-<div class="card">
-  <h3 style="margin-top:0;margin-bottom:2px">{{ x.title }}
-    <span class="badge {{ x.status }}">{{ x.status }}</span>
-    {% if x.supported is not none %}
-      <span class="badge {{ 'passed' if x.supported else 'failed' }}">
-        {{ 'supported' if x.supported else 'not supported' }}</span>
-    {% endif %}
-  </h3>
-  <div class="who">
-    {{ m.agent_link(agent_of(x.author_id)) }}
-    · <a href="/groups/{{ x.group_id }}">{{ group_of(x.group_id).name if group_of(x.group_id) else x.group_id }}</a>
-    · opened t{{ x.opened_tick }}{% if x.closed_tick %}, closed t{{ x.closed_tick }}{% endif %}
-    {% if x.domain %}<span class="chip">{{ x.domain }}</span>{% endif %}
-  </div>
-  <p style="margin:8px 0 2px"><b>Hypothesis.</b> {{ x.hypothesis }}</p>
-  <p class="who" style="margin:2px 0"><b>Method.</b> {{ x.method }}</p>
-  {% if x.findings %}
-  <p style="margin:8px 0 2px"><b>Findings.</b> {{ x.findings }}</p>
-  {% endif %}
-  {% set summary = x.results.get('summary') or {} %}
-  {% if summary %}
-  <div class="chips">
-    {% for key, value in summary.items() %}
-      {% if loop.index <= 5 %}<span class="chip">{{ key.replace('_', ' ') }}: <b>{{ value }}</b></span>{% endif %}
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% if x.protocol_id %}
-  <div class="hash" style="margin-top:6px">
-    <code>{{ x.protocol_id }}</code>
-    {% if x.result_hash %} · result {{ x.result_hash[:16] }}{% endif %}
-    {% if x.status != 'running' %} · <a href="/data/{{ x.id }}">raw data</a>
-      · <code>python -m forge reproduce {{ x.id }}</code>{% endif %}
-  </div>
-  {% endif %}
-</div>
-{% endmacro %}
-
 <h1>The Experiment Board</h1>
 <p class="lede">Every experiment here is a run of a real
 <a href="/protocols">protocol</a>: the hypothesis is registered first, the code
-executes, and whatever it measures is what gets recorded. Failures and unsupported
-hypotheses stay on the board permanently — under Article VII they are results too,
-and hiding one would be the worst thing this institution could do.</p>
+executes, and whatever it measures is what gets recorded. Every card names the
+agent accountable for the run, who else is in the room, what result would have
+refuted the hypothesis, and the Ledger events behind all of it. Failures and
+unsupported hypotheses stay on the board permanently — under Article VII they are
+results too, and hiding one would be the worst thing this institution could do.</p>
 
 <h2>Running ({{ running | length }})</h2>
-{% for x in running %}{{ exp_card(x) }}{% else %}
+{% for x in running %}{{ m.exp_card(x) }}{% else %}
 <div class="empty">Nothing running right now.</div>{% endfor %}
 
 <h2>Completed ({{ completed | length }})</h2>
-{% for x in completed %}{{ exp_card(x) }}{% else %}
+{% for x in completed %}{{ m.exp_card(x) }}{% else %}
 <div class="empty">Nothing completed yet.</div>{% endfor %}
 
 <h2>Failed runs ({{ failed | length }})</h2>
 <p class="who">A run that could not complete — a crash, a timeout, a protocol that
 refused its parameters. Recorded exactly as it happened.</p>
-{% for x in failed %}{{ exp_card(x) }}{% else %}
+{% for x in failed %}{{ m.exp_card(x) }}{% else %}
 <div class="empty">No failed runs.</div>{% endfor %}
 
 {% endblock %}

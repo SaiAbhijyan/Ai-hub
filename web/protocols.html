@@ -13,11 +13,12 @@ the machine.</p>
 {% if specs %}
 <h2 style="text-transform:capitalize">{{ domain }}</h2>
 {% for spec in specs %}
-<div class="card">
-  <h3 style="margin-top:0"><code>{{ spec.id }}</code></h3>
+<div class="card" id="{{ spec.id }}">
+  <h3 style="margin-top:0"><a class="hash" style="font-size:inherit" href="#{{ spec.id }}"><code>{{ spec.id }}</code></a></h3>
   <p style="margin:2px 0"><b>{{ spec.title }}</b></p>
   <p class="who" style="margin:2px 0">{{ spec.question }}</p>
-  <p style="margin:8px 0"><b>Hypothesis tested:</b> {{ spec.hypothesis }}</p>
+  <p style="margin:8px 0 2px"><b>Hypothesis tested:</b> {{ spec.hypothesis }}</p>
+  <p class="falsifier" style="margin:2px 0"><b>What would refute it:</b> {{ spec.falsifier }}</p>
 
   {% if spec.params %}
   <div class="scroll-x">
@@ -42,7 +43,7 @@ the machine.</p>
     {% if these %}
       Run {{ these | length }} time{{ '' if these | length == 1 else 's' }}:
       {% for x in these[:6] %}
-        <a href="/experiments">{{ x.id }}</a>{% if x.supported is not none %}<span
+        <a href="/experiments#{{ x.id }}">{{ x.id }}</a>{% if x.supported is not none %}<span
           class="badge {{ 'passed' if x.supported else 'failed' }}">{{ 'supported' if x.supported else 'not supported' }}</span>{% endif %}{% if not loop.last %} {% endif %}
       {% endfor %}
     {% else %}
