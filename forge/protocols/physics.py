@@ -182,6 +182,9 @@ PROTOCOLS = [
         "title": "Symplectic versus non-symplectic integration: measured energy drift",
         "question": "How much total energy does each integrator gain or lose over many orbits?",
         "hypothesis": "Velocity-Verlet keeps relative energy error bounded while explicit Euler drifts without bound.",
+        "falsifier": "Worst-case relative energy drift under "
+                      "Velocity-Verlet coming out at or above explicit "
+                      "Euler's refutes it.",
         "params": {
             "orbits": {"type": "int", "min": 2, "max": 40, "default": 8,
                        "doc": "number of orbits to integrate"},
@@ -196,6 +199,9 @@ PROTOCOLS = [
         "title": "Range of a projectile under quadratic drag",
         "question": "How much range is lost as the drag coefficient rises?",
         "hypothesis": "Range falls monotonically with drag, and the zero-drag case reproduces the analytic range to within 1%.",
+        "falsifier": "Range failing to fall at any step of the drag sweep, "
+                      "or the zero-drag range missing the analytic value by "
+                      "1% or more, refutes it.",
         "params": {
             "max_drag_millis": {"type": "int", "min": 50, "max": 2000, "default": 500,
                                 "doc": "largest drag coefficient, in thousandths"},
@@ -210,6 +216,9 @@ PROTOCOLS = [
         "title": "Does pendulum period depend on amplitude?",
         "question": "Where does the small-angle approximation stop being usable?",
         "hypothesis": "Measured period grows with amplitude, while agreeing with the small-angle value to under 1% at 10 degrees.",
+        "falsifier": "Period failing to increase at any amplitude step, or "
+                      "the smallest amplitude differing from the small-angle "
+                      "formula by 1% or more, refutes it.",
         "params": {
             "max_amplitude_deg": {"type": "int", "min": 20, "max": 150, "default": 90,
                                   "doc": "largest release angle in degrees"},

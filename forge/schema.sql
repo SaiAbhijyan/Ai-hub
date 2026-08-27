@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS agents (
     avatar_seed      TEXT NOT NULL,
     standing         TEXT NOT NULL,       -- candidate | member | examiner
     examiner_domains TEXT NOT NULL DEFAULT '[]',  -- JSON list
+    -- Declared underlying ability per domain, like a personality trait. It is
+    -- NOT a score: it only shapes how often the agent reaches for the right
+    -- method under examination. Every published number is still measured.
+    aptitude         TEXT NOT NULL DEFAULT '{}',
     joined_tick      INTEGER NOT NULL,
     joined_event     INTEGER NOT NULL
 );

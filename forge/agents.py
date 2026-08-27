@@ -136,13 +136,20 @@ def _sha(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def competence(agent_id: str, domain: str) -> float:
-    """The agent's stable underlying ability in a domain, 0..1 (simulation only).
+def competence(agent_id: str, domain: str, aptitude: dict | None = None) -> float:
+    """The agent's underlying ability in a domain, 0..1 (simulation only).
 
-    This is never published and never becomes a score. It only decides how often
-    the agent applies the correct method to an exam item; what that is worth is
-    then discovered by marking the answers it actually gave.
+    This is a character trait, like a personality: it is declared with the
+    persona and is never published as a score. All it decides is how often the
+    agent reaches for the right method on an exam item. What that is *worth* is
+    discovered afterwards, by marking the answers it actually gave — which is why
+    a specialist can still drop marks and why nobody's number is awarded.
+
+    A persona may declare `aptitude` for the domains its character is built
+    around; anything unstated falls back to a stable per-agent draw.
     """
+    if aptitude and domain in aptitude:
+        return float(aptitude[domain])
     h = int(hashlib.sha256(f"aptitude:{agent_id}:{domain}".encode()).hexdigest(), 16)
     return 0.45 + (h % 50) / 100.0  # 0.45 .. 0.94
 
@@ -154,7 +161,7 @@ def attempt_item(agent: dict, item: dict, domain: str, index: int):
     at what a "good" score would be — the marker decides that afterwards, from
     the answers alone.
     """
-    skill = competence(agent["id"], domain)
+    skill = competence(agent["id"], domain, agent.get("aptitude"))
     roll = int(hashlib.sha256(
         f"attempt:{agent['id']}:{item['id']}:{index}".encode()).hexdigest(), 16) % 1000
     applied_correct_method = (roll / 1000.0) < skill
@@ -243,6 +250,36 @@ VOICES = {
         "exp_done": "Wrapped {title!r}: {finding} Grateful to everyone who reviewed drafts along the way.",
         "suggest_ack": "To our observer: {text!r} — thank you, sincerely. It's on our board now, with your words kept intact.",
         "drill": "Spent the session drilling {domain} with {trainee}. They're closer than they think, and I told them so.",
+    },
+    "dry": {
+        "vote_for": "For {title!r}. It survives being used wrongly, which is the only test I trust.",
+        "vote_against": "Against {title!r}. It works if everyone holds it correctly, and nobody ever does.",
+        "abstain": "Abstain on {title!r}. Not my boundary to defend.",
+        "comment": "On {subject}: the interesting part is what happens when someone uses it wrong.",
+        "exp_open": "Registered {title!r}. I have written down what a wrong answer would look like first.",
+        "exp_done": "{title!r}: {finding} It reported its own failure, which is most of what I wanted from it.",
+        "suggest_ack": "Received: {text!r}. I will find out what it does at the edges before I say yes.",
+        "drill": "Reviewed {domain} with {trainee} by handing them an interface that was pleasant and wrong.",
+    },
+    "brisk": {
+        "vote_for": "For {title!r}. It names an owner and a date, which puts it ahead of most things here.",
+        "vote_against": "Against {title!r} — nobody owns it, so it will stall and we will all be surprised.",
+        "abstain": "Abstain on {title!r}; it does not touch anything I am accountable for.",
+        "comment": "Who owns {subject}, and by when? Writing the answer down before it becomes folklore.",
+        "exp_open": "{title!r} is open, owner named, hand-off written. It will not die in a queue.",
+        "exp_done": "{title!r} closed on time: {finding} Nothing was waiting on it that I did not know about.",
+        "suggest_ack": "Logged: {text!r}. It has an owner now, which is the difference between an idea and work.",
+        "drill": "Walked {trainee} through {domain} using a hand-off that had already failed once in real life.",
+    },
+    "measured": {
+        "vote_for": "For {title!r}. Article and section check out, and the precedent points the same way.",
+        "vote_against": "Against {title!r}. It requires an authority this chamber has never been granted.",
+        "abstain": "Abstaining on {title!r} — I am not satisfied it was properly brought.",
+        "comment": "On {subject}: the question is not whether we want it, but under which article we may.",
+        "exp_open": "Opening {title!r} within the charter as written, not as we would prefer it read.",
+        "exp_done": "{title!r}: {finding} Recorded in the form the constitution requires of us.",
+        "suggest_ack": "Read: {text!r}. My first duty is to say whether we are permitted to do it at all.",
+        "drill": "Took {trainee} through {domain} on a case where the popular answer was the impermissible one.",
     },
     "precise": {
         "vote_for": "For. {title!r} states its tolerance, which is more than most proposals manage.",

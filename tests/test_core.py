@@ -98,24 +98,55 @@ def test_admission_requires_battery(seeded):
 
 
 def test_examiner_domain_enforced(seeded):
-    # sable is not an examiner at all
-    err = validate(seeded, "sable", "open_assessment",
-                   {"id": "a-x", "candidate_id": "ember", "domain": "coding",
+    """Who may examine is read off the Ledger, not assumed.
+
+    Since the Founding Convocation, no agent's examinerships are written into
+    the seed — they are earned on a marked paper — so this test asks the store
+    who actually holds what and then checks the rule against real standing.
+    """
+    target = next(a["id"] for a in seeded.agents(standing="candidate"))
+
+    # An agent that holds no examinership at all is refused on standing.
+    not_examiner = next(a["id"] for a in seeded.agents()
+                        if a["standing"] not in ("examiner", "member"))
+    err = validate(seeded, not_examiner, "open_assessment",
+                   {"id": "a-x", "candidate_id": target, "domain": "coding",
                     "tasks": ["t"]})
-    assert "may not" in err
-    # quill examines communication, not coding
-    err = validate(seeded, "quill", "open_assessment",
-                   {"id": "a-x", "candidate_id": "ember", "domain": "coding",
+    assert "may not" in err, err
+
+    # An examiner may not stray outside the domains it was appointed in.
+    wrong = next((a for a in seeded.agents(standing="examiner")
+                  if "coding" not in a["examiner_domains"]), None)
+    assert wrong is not None, "every examiner holds coding — the seating is too broad"
+    err = validate(seeded, wrong["id"], "open_assessment",
+                   {"id": "a-x", "candidate_id": target, "domain": "coding",
                     "tasks": ["t"]})
-    assert "not an examiner for coding" in err
+    assert "not an examiner for coding" in err, err
 
 
 def test_group_threshold_enforced(seeded):
-    # quill's coding is 52; the Infrastructure Laboratory requires 60
-    err = validate(seeded, "quill", "join_group", {"group_id": "lab-forge"})
-    assert err and "threshold" in err
-    # nix has coding 64 and may join
-    assert validate(seeded, "nix", "join_group", {"group_id": "lab-forge"}) is None
+    """A charter threshold binds on the measured score, whatever it turns out
+    to be. The scores are earned at genesis now, so the test finds one agent
+    below the bar and one above rather than naming numbers that will drift."""
+    lab = seeded.group("lab-forge")
+    domain, minimum = next(iter(lab["thresholds"].items()))
+    members = {m["id"] for m in seeded.group_members("lab-forge")}
+    below = above = None
+    for a in seeded.agents():
+        if a["id"] in members or a["standing"] not in ("member", "examiner"):
+            continue
+        score = seeded.capabilities_current(a["id"]).get(domain)
+        if score is None:
+            continue
+        if score < minimum and below is None:
+            below = a["id"]
+        if score >= minimum and above is None:
+            above = a["id"]
+    assert below, f"no member scores under {minimum} in {domain}"
+    err = validate(seeded, below, "join_group", {"group_id": "lab-forge"})
+    assert err and "threshold" in err, err
+    if above:
+        assert validate(seeded, above, "join_group", {"group_id": "lab-forge"}) is None
 
 
 def test_result_requires_findings(seeded):
@@ -215,9 +246,14 @@ def test_engine_is_deterministic(tmp_path):
 
 def test_chamber_keeps_governing_itself(engine):
     """After the founding business is done the Chamber must not go dormant:
-    agents keep raising appointments and resolutions, and both outcomes occur."""
+    agents keep raising appointments and resolutions, and both outcomes occur.
+
+    260 ticks, not 160: the Founding Convocation now occupies genesis, so the
+    Chamber's own business starts later than it did before founders were
+    examined. A defeat first appears around tick 135-200 depending on the run.
+    """
     store = engine.store
-    for _ in range(160):
+    for _ in range(260):
         engine.tick()
     props = store.proposals()
     assert len(props) >= 8, [p["title"] for p in props]
@@ -233,7 +269,7 @@ def test_chamber_keeps_governing_itself(engine):
             assert target["standing"] == "examiner"
             break
     else:
-        raise AssertionError("no examiner appointment passed in 160 ticks")
+        raise AssertionError("no examiner appointment passed in 260 ticks")
     assert store.verify_chain()["ok"]
 
 
@@ -426,3 +462,18 @@ def test_experiments_reach_outcomes(engine):
     assert closed, "no experiment reached an outcome in 60 ticks"
     for x in closed:
         assert x["findings"].strip()
+
+
+def test_the_ratified_version_matches_the_document(seeded):
+    """The number on the Ledger is read out of the constitution it ratifies, so
+    the site can never advertise a version the text does not claim."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).parent.parent / "constitution" / "CONSTITUTION.md").read_text()
+    stated = re.search(r"^\*Version ([0-9.]+)", text, re.M).group(1)
+    assert seeded.get_meta("constitution_version") == stated
+    ratified = next(e for e in seeded.events(limit=5000)
+                    if e["action_type"] == "ratify_constitution")
+    assert ratified["payload"]["version"] == stated
+    assert ratified["payload"]["text"] == text

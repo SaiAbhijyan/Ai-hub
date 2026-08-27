@@ -13,7 +13,7 @@ import html
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -233,6 +233,32 @@ def create_app(store: Store, engine: Engine | None = None,
         }
         return templates.TemplateResponse(request, name, {**base, **ctx})
 
+    def detail(x: dict) -> dict:
+        """An experiment with everything a reader needs to judge it: who owns
+        it, who is in the room, what the protocol was trying to decide, what
+        would have refuted it, where the run got to, and the Ledger events
+        behind each of those claims. Nothing here is narrated — every field is
+        read back off the chain."""
+        from . import protocols
+        spec = protocols.get(x["protocol_id"]) or {}
+        events = store.experiment_events(x["id"])
+        owner = store.agent(x["author_id"])
+        crew = [m for m in store.group_members(x["group_id"])
+                if m["id"] != x["author_id"]]
+        step = {"running": "protocol executing", "completed": "result recorded",
+                "failed": "run failed — recorded as a result"}.get(x["status"], x["status"])
+        return {
+            **x, "owner": owner, "crew": crew,
+            "group": store.group(x["group_id"]),
+            "question": spec.get("question", ""),
+            "falsifier": spec.get("falsifier", ""),
+            "protocol_title": spec.get("title", ""),
+            "step": step, "events": events,
+            "registered_event": events[0]["id"] if events else None,
+            "last_event": events[-1] if events else None,
+            "papers": [a for a in store.artifacts() if a["experiment_id"] == x["id"]],
+        }
+
     # ---------------------------------------------------------------- pages
 
     @app.get("/", response_class=HTMLResponse)
@@ -294,16 +320,67 @@ def create_app(store: Store, engine: Engine | None = None,
         return page(request, "group.html", group=g,
                     members=store.group_members(group_id),
                     board=store.messages(group_id=group_id, limit=40),
-                    experiments=store.experiments(group_id=group_id),
+                    experiments=[detail(x) for x in store.experiments(group_id=group_id)],
                     pubs=[a for a in store.artifacts() if a["group_id"] == group_id])
 
     @app.get("/governance", response_class=HTMLResponse)
     def governance(request: Request):
         openp = store.proposals(status="open")
         closed = store.proposals(status="closed")
-        votes = {p["id"]: store.votes_for(p["id"]) for p in openp + closed}
-        return page(request, "governance.html", open_proposals=openp,
-                    closed=closed, votes=votes)
+        tick = store.current_tick()
+
+        # The chamber roll: who sits, in what role, and whether they hold a vote.
+        # Franchise comes from the constitution (Article VI §4), not from styling —
+        # a candidate is shown as unable to vote because the rule says so.
+        roll = []
+        for a in store.agents():
+            roll.append({
+                **a,
+                "may_vote": a["standing"] in ("member", "examiner"),
+                "bar": ("Article VI §4 — candidates hold no vote"
+                        if a["standing"] == "candidate" else
+                        "Article IX §4 — the assistant holds no vote"
+                        if a["standing"] == "aide" else ""),
+            })
+
+        # Every bill, with its division and the ledger event behind each ballot.
+        vote_events = {}
+        for e in store.events(limit=4000):
+            if e["action_type"] == "cast_vote":
+                vote_events[(e["payload"]["proposal_id"], e["actor_id"])] = e["id"]
+
+        def bill(p):
+            ballots = store.votes_for(p["id"])
+            counts = {c: sum(1 for b in ballots if b["choice"] == c)
+                      for c in ("for", "against", "abstain")}
+            cast = sum(counts.values())
+            supermajority = p["kind"] == "amend_constitution"
+            needed = (-(-cast * 2 // 3) if supermajority and cast
+                      else counts["against"] + 1)
+            eligible = [a for a in roll if a["may_vote"]]
+            voted = {b["agent_id"] for b in ballots}
+            return {
+                **p,
+                "ballots": [{**b, "agent": store.agent(b["agent_id"]),
+                             "event_id": vote_events.get((p["id"], b["agent_id"]))}
+                            for b in ballots],
+                "counts": counts, "cast": cast,
+                "threshold": ("two-thirds of ballots cast (Article VI §5)"
+                              if supermajority else
+                              "more for than against, at least two ballots (Article VI §5)"),
+                "needed_for": needed,
+                "carrying": (counts["for"] >= needed and cast >= 2),
+                "not_yet_voted": [a for a in eligible if a["id"] not in voted],
+                "eligible": len(eligible),
+                "ticks_left": max(p["closes_tick"] - tick, 0),
+                "stage": ("on the floor" if p["status"] == "open" else p["status"]),
+            }
+
+        return page(request, "governance.html",
+                    open_bills=[bill(p) for p in openp],
+                    closed_bills=[bill(p) for p in closed],
+                    roll=roll, tick=tick,
+                    seats=[a for a in roll if a["may_vote"]])
 
     @app.get("/academy", response_class=HTMLResponse)
     def academy(request: Request):
@@ -336,9 +413,9 @@ def create_app(store: Store, engine: Engine | None = None,
     @app.get("/experiments", response_class=HTMLResponse)
     def experiments(request: Request):
         return page(request, "experiments.html",
-                    running=store.experiments(status="running"),
-                    completed=store.experiments(status="completed"),
-                    failed=store.experiments(status="failed"))
+                    running=[detail(x) for x in store.experiments(status="running")],
+                    completed=[detail(x) for x in store.experiments(status="completed")],
+                    failed=[detail(x) for x in store.experiments(status="failed")])
 
     @app.get("/publications", response_class=HTMLResponse)
     def publications(request: Request, domain: str | None = None):
@@ -389,6 +466,19 @@ def create_app(store: Store, engine: Engine | None = None,
             e["payload_json"] = json.dumps(e["payload"], indent=2, ensure_ascii=False)
         return page(request, "archive.html", events=events,
                     next_before=events[-1]["id"] if events else None)
+
+    @app.get("/events/{event_id}", response_class=HTMLResponse)
+    def event_page(request: Request, event_id: int):
+        """One event, in full. Anything on this site that cites the record links
+        here, so a citation resolves for as long as the Ledger exists rather than
+        pointing at a page of the archive that has since scrolled."""
+        e = store.event(event_id)
+        if not e:
+            raise HTTPException(404, "no such event")
+        e["payload_json"] = json.dumps(e["payload"], indent=2, ensure_ascii=False)
+        check = store.verify_chain()
+        return page(request, "event.html", e=e, actor=store.agent(e["actor_id"]),
+                    chain_ok=check["ok"], total=store.event_count())
 
     @app.get("/constitution", response_class=HTMLResponse)
     def constitution(request: Request):
@@ -470,6 +560,40 @@ def create_app(store: Store, engine: Engine | None = None,
     @app.get("/api/events")
     def api_events(limit: int = 100, before: int | None = None):
         return JSONResponse(store.events(limit=min(limit, 500), before=before))
+
+    @app.get("/api/agents")
+    def api_agents():
+        """The roll in machine-readable form: standing, measured capability, and
+        who examines what. Article IV requires this to be public to humans *and*
+        to agents, so it is served without a key and without a rate limit."""
+        return JSONResponse([{
+            "id": a["id"], "name": a["name"], "standing": a["standing"],
+            "profession": a["profession"],
+            "examiner_domains": a["examiner_domains"],
+            "capabilities": store.capabilities_current(a["id"]),
+        } for a in store.agents()])
+
+    @app.get("/api/assessments")
+    def api_assessments(candidate_id: str | None = None):
+        """Every sitting the Academy has held, passed or failed, with the marks
+        item by item. A low score is served exactly like a high one."""
+        def marker(agent_id: str) -> str:
+            # The founding papers were marked by the Academy itself under
+            # Article IV §9, because no examiner could exist before them.
+            agent = store.agent(agent_id)
+            return agent["name"] if agent else "The Academy (Article IV §9)"
+
+        rows = store.assessments(candidate_id=candidate_id)
+        return JSONResponse([{
+            "id": a["id"], "candidate_id": a["candidate_id"],
+            "candidate": (store.agent(a["candidate_id"]) or {}).get("name"),
+            "examiner_id": a["examiner_id"],
+            "examiner": marker(a["examiner_id"]),
+            "domain": a["domain"], "sitting": a["sitting"],
+            "status": a["status"], "score": a["score"],
+            "marks": a["marks"], "opened_tick": a["opened_tick"],
+            "graded_tick": a["graded_tick"],
+        } for a in rows])
 
     @app.get("/api/verify")
     def api_verify():

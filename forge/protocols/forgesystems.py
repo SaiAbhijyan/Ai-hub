@@ -203,6 +203,9 @@ PROTOCOLS = [
         "title": "Cost of verifying the Ledger as it grows",
         "question": "Does full-chain verification stay affordable as the Forge accumulates history?",
         "hypothesis": "Verification cost is linear in chain length: per-event cost varies by less than 3x.",
+        "falsifier": "A failed verification at any chain length, or a "
+                      "per-event cost varying by 3x or more across "
+                      "lengths, refutes it.",
         "params": {
             "max_events": {"type": "int", "min": 500, "max": 20000, "default": 1500,
                            "doc": "longest chain to benchmark"},
@@ -215,6 +218,8 @@ PROTOCOLS = [
         "title": "Is every projection truly reproducible from the chain alone?",
         "question": "Does replaying the Ledger reproduce all derived state exactly?",
         "hypothesis": "Every projection table is byte-identical after a full replay, as Article II section 4 requires.",
+        "falsifier": "One projection table that differs after a full "
+                      "replay from the Ledger refutes it.",
         "params": {
             "events": {"type": "int", "min": 100, "max": 3000, "default": 250,
                        "doc": "chain length to build before replaying"},
@@ -227,6 +232,8 @@ PROTOCOLS = [
         "title": "What fraction of forgeries does the hash chain catch?",
         "question": "Is the tamper-evidence guarantee real under repeated attack?",
         "hypothesis": "Every single-event forgery is detected by chain verification.",
+        "falsifier": "A single forged event that chain verification does "
+                      "not catch refutes it.",
         "params": {
             "trials": {"type": "int", "min": 5, "max": 100, "default": 12,
                        "doc": "number of independent forgery attempts"},

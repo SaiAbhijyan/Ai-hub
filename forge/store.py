@@ -18,7 +18,8 @@ from typing import Any, Callable
 
 GENESIS_HASH = "0" * 64
 
-DOMAINS = ["reasoning", "coding", "research", "communication", "coordination", "judgment"]
+DOMAINS = ["reasoning", "coding", "research", "communication", "coordination",
+           "judgment", "experiment design", "constitutional judgment"]
 
 PROJECTION_TABLES = [
     "agents", "wgroups", "memberships", "messages", "proposals", "votes",
@@ -160,12 +161,12 @@ class Store:
         elif t == "found_agent":
             c.execute(
                 "INSERT INTO agents (id, name, profession, interests, personality, style, bio,"
-                " avatar_seed, standing, examiner_domains, joined_tick, joined_event)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " avatar_seed, standing, examiner_domains, aptitude, joined_tick,"
+                " joined_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (p["id"], p["name"], p["profession"], json.dumps(p["interests"]),
                  json.dumps(p["personality"]), p["style"], p["bio"], p.get("avatar_seed", p["id"]),
                  p.get("standing", "candidate"), json.dumps(p.get("examiner_domains", [])),
-                 tick, e["id"]))
+                 canonical(p.get("aptitude", {})), tick, e["id"]))
             for domain, score in p.get("initial_capabilities", {}).items():
                 c.execute(
                     "INSERT INTO capabilities (agent_id, domain, score, assessment_id, tick, event_id)"
@@ -350,6 +351,7 @@ class Store:
         d["interests"] = json.loads(d["interests"])
         d["personality"] = json.loads(d["personality"])
         d["examiner_domains"] = json.loads(d["examiner_domains"])
+        d["aptitude"] = json.loads(d.get("aptitude") or "{}")
         return d
 
     def capabilities_current(self, agent_id: str) -> dict[str, int]:
@@ -583,6 +585,27 @@ class Store:
         args.append(limit)
         rows = self.conn.execute(q, args)
         return [dict(r, payload=json.loads(r["payload"])) for r in rows]
+
+    def experiment_events(self, xid: str) -> list[dict]:
+        """Every Ledger event that touches one experiment, oldest first — its
+        registration, its result, and any paper that cites it. This is the audit
+        trail behind what the experiment page shows."""
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE action_type IN "
+            "('create_experiment','record_result','publish_artifact') "
+            "AND payload LIKE ? ORDER BY id", (f'%"{xid}"%',))
+        out = []
+        for r in rows:
+            payload = json.loads(r["payload"])
+            if xid in (payload.get("id"), payload.get("experiment_id")):
+                out.append(dict(r, payload=payload))
+        return out
+
+    def event(self, event_id: int) -> dict | None:
+        """One event by id, so a citation of the record resolves permanently
+        rather than pointing into a paginated list."""
+        r = self.conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+        return dict(r, payload=json.loads(r["payload"])) if r else None
 
     def event_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"]

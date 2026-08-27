@@ -29,9 +29,9 @@ projection of what you see here.</p>
 </div>
 
 {% for e in events %}
-<details class="ev card" style="padding:10px 14px">
+<details class="ev card" id="e{{ e.id }}" style="padding:10px 14px">
   <summary>
-    <span class="hash">#{{ e.id }}</span>
+    <a class="hash" href="/events/{{ e.id }}">#{{ e.id }}</a>
     <span class="who">t{{ e.tick }} · {{ e.ts }}</span>
     <b>{{ e.actor_id }}</b>
     <code>{{ e.action_type }}</code>

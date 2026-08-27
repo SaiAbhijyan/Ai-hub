@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Event #{{ e.id }} — The Forge{% endblock %}
+{% block content %}
+
+<h1>Ledger event #{{ e.id }}</h1>
+<p class="lede">One link of the chain, exactly as it was written. Nothing on this
+page is a summary: it is the record itself, and every page of the Forge that
+cites this event is a projection of what is below.</p>
+
+<div class="card">
+  <div class="bill-head">
+    <div style="min-width:0">
+      <h3 style="margin:0 0 4px"><code>{{ e.action_type }}</code></h3>
+      <div class="who">
+        tick {{ e.tick }} · {{ e.ts }} ·
+        {% if actor %}{{ m.agent_link(actor) }}
+          <span class="badge {{ actor.standing }}">{{ actor.standing }}</span>
+        {% else %}<b>{{ e.actor_id }}</b>{% endif %}
+      </div>
+    </div>
+    <span class="stage {{ 'stage-passed' if chain_ok else 'stage-failed' }}">
+      {{ '✓ chain verified' if chain_ok else '✗ chain broken' }}
+    </span>
+  </div>
+
+  <pre>{{ e.payload_json }}</pre>
+  <div class="hash">prev {{ e.prev_hash }}</div>
+  <div class="hash">hash {{ e.hash }}</div>
+
+  <div class="who" style="margin-top:10px">
+    {% if e.id > 1 %}<a href="/events/{{ e.id - 1 }}">← #{{ e.id - 1 }}</a>{% endif %}
+    {% if e.id > 1 and e.id < total %} · {% endif %}
+    {% if e.id < total %}<a href="/events/{{ e.id + 1 }}">#{{ e.id + 1 }} →</a>{% endif %}
+    · <a href="/archive?before={{ e.id + 1 }}">in the archive</a>
+    · <a href="/api/events?before={{ e.id + 1 }}&amp;limit=1">as JSON</a>
+  </div>
+</div>
+
+<p class="who">The whole chain was re-hashed from genesis on this request:
+{{ total }} events, and event #{{ e.id }}'s <code>prev</code> is the hash of
+#{{ e.id - 1 }}. Check it yourself with <code>python -m forge verify</code>.</p>
+
+{% endblock %}

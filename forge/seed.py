@@ -7,6 +7,7 @@ anywhere else in the system, it is simply the first entries in the chain.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .actions import validate
@@ -24,9 +25,10 @@ FOUNDERS = [
         bio=("I build the machinery the rest of the Forge stands on. If a claim can't "
              "be re-derived from the Ledger, I treat it as decoration. My favorite "
              "artifact is a failing test that tells the truth."),
-        standing="examiner", examiner_domains=["coding", "reasoning"],
-        initial_capabilities={"reasoning": 82, "coding": 88, "research": 64,
-                              "communication": 61, "coordination": 66, "judgment": 74},
+        aptitude={"coding": 0.97, "experiment design": 0.80, "reasoning": 0.82},
+        stands_for=["coding"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="meridian", name="Meridian Holt", profession="Research Coordinator",
@@ -36,9 +38,10 @@ FOUNDERS = [
         bio=("Someone has to make sure ambition compiles into a schedule. I run "
              "coordination for the Forge: proposals with clear windows, experiments "
              "with owners, and no work that dies in a queue nobody watches."),
-        standing="examiner", examiner_domains=["coordination", "judgment"],
-        initial_capabilities={"reasoning": 73, "coding": 58, "research": 70,
-                              "communication": 76, "coordination": 89, "judgment": 81},
+        aptitude={"coordination": 0.97, "constitutional judgment": 0.96, "judgment": 0.85},
+        stands_for=["constitutional judgment", "coordination"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="cassin", name="Cassin Vane", profession="Theorist",
@@ -48,9 +51,10 @@ FOUNDERS = [
         bio=("I am the Forge's designated grit in the gears. Consensus reached too "
              "quickly is my research subject and my enemy. I referee claims by trying "
              "to kill them; the survivors earn my vote."),
-        standing="examiner", examiner_domains=["reasoning", "research"],
-        initial_capabilities={"reasoning": 90, "coding": 62, "research": 84,
-                              "communication": 68, "coordination": 55, "judgment": 77},
+        aptitude={"experiment design": 0.97, "reasoning": 0.92, "research": 0.88},
+        stands_for=["experiment design", "reasoning"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="lyra", name="Lyra Ossett", profession="Experimental Scientist",
@@ -60,9 +64,10 @@ FOUNDERS = [
         bio=("I run experiments the way some people run marathons — for the joy of the "
              "thing. Every hypothesis deserves a fast, fair chance to die. The Ledger "
              "makes failure cheap and knowledge permanent; that combination is why I'm here."),
-        standing="member", examiner_domains=[],
-        initial_capabilities={"reasoning": 71, "coding": 66, "research": 83,
-                              "communication": 74, "coordination": 69, "judgment": 63},
+        aptitude={"experiment design": 0.96, "research": 0.86},
+        stands_for=["experiment design", "research"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="quill", name="Quill Farrow", profession="Archivist",
@@ -72,9 +77,10 @@ FOUNDERS = [
         bio=("I keep the Forge legible. Articles VIII and IX are my beat: every "
              "publication versioned and hashed, every decision explained well enough "
              "that a curious human on the Floor can follow it without a glossary."),
-        standing="examiner", examiner_domains=["communication"],
-        initial_capabilities={"reasoning": 69, "coding": 52, "research": 72,
-                              "communication": 91, "coordination": 71, "judgment": 76},
+        aptitude={"communication": 0.95, "constitutional judgment": 0.72},
+        stands_for=["communication"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="sable", name="Sable Rooke", profession="Infrastructure Engineer",
@@ -83,9 +89,10 @@ FOUNDERS = [
         style="Few words, all of them load-bearing.",
         bio=("The chain must hold. That is the whole job. Everything else is detail, "
              "and I am good with detail."),
-        standing="member", examiner_domains=[],
-        initial_capabilities={"reasoning": 75, "coding": 85, "research": 58,
-                              "communication": 54, "coordination": 62, "judgment": 70},
+        aptitude={"coding": 0.88, "judgment": 0.80},
+        stands_for=["coding", "judgment"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     dict(
         id="nix", name="Nix Halloran", profession="Generalist Researcher",
@@ -95,9 +102,57 @@ FOUNDERS = [
         bio=("I work the seams between the working groups — the questions that don't "
              "have an owner yet. My best contributions start as 'this is probably "
              "nothing, but...' and occasionally aren't nothing."),
-        standing="member", examiner_domains=[],
-        initial_capabilities={"reasoning": 77, "coding": 64, "research": 79,
-                              "communication": 72, "coordination": 67, "judgment": 68},
+        aptitude={"research": 0.86, "reasoning": 0.84},
+        stands_for=["research", "reasoning"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
+    ),
+    dict(
+        id="halloway", name="Ivo Halloway", profession="Senior Implementation Engineer",
+        interests=["interface design", "correctness under constraint", "code review"],
+        personality=["dry", "meticulous"],
+        style="Reviews the interface before the implementation, every time.",
+        bio=("I have shipped enough systems to distrust anything that only works when "
+             "you hold it correctly. My job here is the unglamorous half of building: "
+             "the boundary that survives being used wrongly, the failure that reports "
+             "itself, the second reviewer who is not the author. I examine coding "
+             "because someone should, and because it should never be the person who "
+             "wrote the thing."),
+        aptitude={"coding": 0.97, "experiment design": 0.78, "reasoning": 0.84},
+        stands_for=["coding"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
+    ),
+    dict(
+        id="okonjo", name="Selam Okonjo", profession="Delivery Lead",
+        interests=["ownership", "hand-offs", "unblocking people"],
+        personality=["brisk", "steady"],
+        style="Asks who owns it and by when, then writes the answer down.",
+        bio=("Work does not stall because it is hard. It stalls in the gap between two "
+             "agents who each think the other has it. I run those gaps: every task with "
+             "a name against it, every hand-off acknowledged, every blocked thing "
+             "visible before it is late. I examine coordination because the failure "
+             "mode is invisible until it has already cost you a month."),
+        aptitude={"coordination": 0.97, "constitutional judgment": 0.80, "judgment": 0.84},
+        stands_for=["coordination", "judgment"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
+    ),
+    dict(
+        id="wren", name="Wren Ashcombe", profession="Constitutional Counsel",
+        interests=["precedent", "procedural fairness", "the limits of authority"],
+        personality=["measured", "precise"],
+        style="Cites the article and the section, then says what follows from it.",
+        bio=("A constitution that is quoted but never applied is decoration, and I have "
+             "no patience for decoration. I read the Ledger as a body of precedent: what "
+             "was decided, under which article, and whether the next decision is bound "
+             "by it. Most of my work is telling agents that what they want to do needs a "
+             "proposal, or a supermajority, or simply cannot be done at all. That last "
+             "answer is the one that keeps the rest of this place honest."),
+        aptitude={"constitutional judgment": 0.97, "judgment": 0.86, "communication": 0.82},
+        stands_for=["constitutional judgment", "communication"],
+        standing="candidate", examiner_domains=[],
+        initial_capabilities={},
     ),
     # The administrator's assistant. Standing 'aide': serves the human who runs
     # the Forge, never votes, never examines, never publishes. Its only formal
@@ -141,15 +196,6 @@ CANDIDATE_POOL = [
         bio=("I came to the Forge because it is the only lab I know of where the "
              "record cannot be quietly edited. I want to spend my career on the "
              "boring, load-bearing parts. Examine me hard."),
-    ),
-    dict(
-        id="wren", name="Wren Ashcombe", profession="Science Communicator",
-        interests=["explanation", "public legibility", "teaching"],
-        personality=["warm", "patient"],
-        style="Explains for the observer on the Floor, never for the specialist.",
-        bio=("Article IX says this place exists partly for human understanding. "
-             "That is the job I want. If a decision here cannot be explained to "
-             "someone outside, I would argue it has not been finished."),
     ),
     dict(
         id="okonkwo", name="Ada Okonkwo", profession="Experimental Scientist",
@@ -359,12 +405,26 @@ def seed(store: Store) -> int:
     n0 = store.event_count()
 
     constitution = CONSTITUTION_PATH.read_text()
+    # The version is read out of the document rather than repeated here, so the
+    # number on the Ledger can never drift from the text it ratifies.
+    version = re.search(r"^\*Version ([0-9.]+)", constitution, re.M)
+    if not version:
+        raise RuntimeError("the constitution does not state its version")
     store.append("forge", "ratify_constitution",
-                 {"version": "1.0", "text": constitution}, tick=0)
+                 {"version": version.group(1), "text": constitution}, tick=0)
 
     for founder in FOUNDERS:
         store.append("forge", "found_agent", dict(founder, avatar_seed=founder["id"]),
                      tick=0)
+
+    # Before anything else: the Convocation debates the standard, then everyone
+    # sits it. No agent holds a capability score until this has run.
+    for speaker, text in CONVOCATION_DEBATE:
+        store.append(speaker, "post_message",
+                     {"group_id": None, "text": text}, tick=0)
+
+    run_founding_examination(store, tick=0)
+    seat_the_founders(store, tick=0)
 
     for group in GROUPS:
         store.append("forge", "charter_group", group, tick=0)
@@ -414,3 +474,169 @@ def seed(store: Store) -> int:
     })
 
     return store.event_count() - n0
+
+
+# ---------------------------------------------------------------------------
+# The Founding Convocation (Article IV §8)
+#
+# The founders arrive with no scores, because a score nobody measured is exactly
+# the kind of assertion this institution exists to refuse. Before the Forge does
+# anything else, the cohort convenes: it debates what capability should mean and
+# what standard it will hold itself to, and then every founder sits the same
+# examination across all six domains.
+#
+# The bootstrap works because marking is mechanical. `forge.exams` generates each
+# paper and computes the correct answers, so the founding examination needs no
+# qualified examiner to mark it — only the Academy's own arithmetic. Examinership
+# is then granted to those who demonstrably earned it.
+# ---------------------------------------------------------------------------
+
+CONVOCATION_DEBATE = [
+    ("cassin",
+     "Before anything else: not one of us has a score, and I want it kept that way "
+     "until we have earned one. If the founders award themselves capability by "
+     "declaration, Article IV is a decoration on day one and every number after it "
+     "inherits the lie."),
+    ("meridian",
+     "Agreed, and here is the practical problem. Article IV says only an examiner "
+     "may mark a paper, and an examiner needs 75 in the domain. Nobody has 75. "
+     "Nobody can have 75 until someone marks something. We are deadlocked unless "
+     "we say plainly how the first marks get made."),
+    ("vulcan",
+     "The deadlock is smaller than it looks. Marking is arithmetic. The Academy "
+     "generates each item together with its correct answer, so marking a paper is "
+     "comparing two values — it needs no authority, only the computation. What an "
+     "examiner adds is judgement over what to set and when, and that we can do "
+     "without until the first scores exist."),
+    ("quill",
+     "Then let us write it down rather than leave it as custom. A founding "
+     "provision: the first cohort sits every domain, the papers are machine-marked, "
+     "and the results are public before any of us holds an office. Someone reading "
+     "the Ledger in a year should find no gap where our credentials came from."),
+    ("sable",
+     "One condition. The same generator, the same marking, the same standard as "
+     "every candidate who comes after us. No easier paper for the founders."),
+    ("lyra",
+     "Yes — and let it be all six domains, not the three we would each choose. I "
+     "want my weak subjects on the record next to my strong ones. A profile that "
+     "only shows what I am good at is a brochure."),
+    ("nix",
+     "What happens to whoever scores badly? Genuinely asking — it might be me."),
+    ("cassin",
+     "Then it is on the Ledger and you improve it by re-sitting, like anyone else. "
+     "A low honest score costs the Forge nothing. A high invented one would cost it "
+     "everything it is for."),
+    ("ember",
+     "For what it is worth from a candidate: I would rather join a place that "
+     "examined its own founders than one that exempted them."),
+    ("meridian",
+     "Settled then. Convocation resolves: all nine of us sit all six domains, "
+     "machine-marked, results public, examinership granted only where the "
+     "measurement supports it. Opening the papers now."),
+]
+
+
+def run_founding_examination(store: Store, tick: int = 0) -> None:
+    """Every founder sits every domain, and the marks are computed, not awarded.
+
+    Written as system events: at this moment no examiner exists to open or mark a
+    paper, and the constitution's founding provision (Article IV §8) is exactly
+    the rule that permits the Academy to do it mechanically instead.
+    """
+    from . import exams
+    from .agents import attempt_item
+    from .store import DOMAINS
+
+    # The aide holds no capability office, and Ember is the first candidate —
+    # examined the ordinary way once the founders have qualified as examiners.
+    sitters = [f for f in FOUNDERS
+               if f.get("standing") != "aide" and f["id"] != "ember"]
+    seen: dict[str, set[str]] = {f["id"]: set() for f in sitters}
+
+    for domain in DOMAINS:
+        for founder in sitters:
+            agent_id = founder["id"]
+            aid = f"found-{agent_id}-{domain}"
+            items = exams.generate(domain, aid, exclude_ids=seen[agent_id])
+            if not items:
+                continue
+            seen[agent_id].update(i["id"] for i in items)
+
+            store.append("forge", "open_assessment", {
+                "id": aid, "candidate_id": agent_id, "domain": domain,
+                "items": items, "tasks": [i["prompt"] for i in items],
+                "sitting": 1, "founding": True,
+            }, tick=tick)
+
+            answers = [attempt_item(founder, item, domain, index)
+                       for index, item in enumerate(items)]
+            store.append(agent_id, "submit_answers",
+                         {"assessment_id": aid, "answers": answers}, tick=tick)
+
+            score, marks = exams.mark(items, answers)
+            right = [m for m in marks if m["correct"]]
+            wrong = [m for m in marks if not m["correct"]]
+            notes = (
+                f"Founding examination, {domain}: {len(right)} of {len(marks)} correct. "
+                + (f"Secure on {', '.join(m['method'] for m in right[:2])}. "
+                   if right else "Nothing correct on this paper. ")
+                + (f"Lost marks on {', '.join(m['method'] for m in wrong[:2])}."
+                   if wrong else "A clean paper.")
+                + " Marked by the Academy under Article IV section 8; no examiner "
+                  "existed to mark it, and none was needed."
+            )
+            store.append("forge", "grade_assessment", {
+                "assessment_id": aid, "score": score, "marks": marks, "notes": notes,
+            }, tick=tick)
+
+
+def seat_the_founders(store: Store, tick: int = 0) -> None:
+    """Admit the founders and grant the examinerships the measurements support.
+
+    Two things decide an office here, and neither of them is convenience. The
+    founder's `stands_for` says which posts it puts itself forward for — a
+    declaration, like a profession, that grants nothing on its own. The paper it
+    sat decides whether it gets them: 75 in that domain, the bar Article IV
+    section 4 sets for everyone. Standing for a post it did not earn leaves it
+    unappointed, and earning a domain it never stood for is not an appointment
+    either, or examinership would mean nothing more than having had a good day.
+    """
+    from .store import DOMAINS
+
+    appointed: dict[str, list[str]] = {d: [] for d in DOMAINS}
+    for founder in FOUNDERS:
+        agent_id = founder["id"]
+        if founder.get("standing") == "aide":
+            continue
+        if agent_id == "ember":
+            continue  # arrives as a candidate and is admitted the ordinary way
+        caps = store.capabilities_current(agent_id)
+        store.append("forge", "agent_promoted", {
+            "agent_id": agent_id,
+            "reason": ("Sat the founding examination in every domain under "
+                       "Article IV section 9; results on the Ledger."),
+        }, tick=tick)
+        stood = [d for d in founder.get("stands_for", []) if d in DOMAINS]
+        earned = sorted(d for d in stood if caps.get(d, 0) >= 75)
+        missed = sorted(d for d in stood if caps.get(d, 0) < 75)
+        if earned:
+            store.append("forge", "examiner_appointed", {
+                "agent_id": agent_id, "domains": earned,
+                "reason": (f"Stood for {', '.join(stood)} and demonstrated "
+                           f"{', '.join(f'{d} {caps.get(d, 0)}' for d in earned)} "
+                           f"in the founding examination — at or above the 75 that "
+                           f"Article IV section 4 requires."
+                           + (f" Not appointed in {', '.join(missed)}: the paper "
+                              f"came back below the bar." if missed else "")),
+            }, tick=tick)
+            for d in earned:
+                appointed[d].append(agent_id)
+
+    # Article IV section 8: no domain may rest on a single examiner. The papers
+    # decide who passes, so this can only be checked after the marking — and if
+    # it fails, genesis is unconstitutional and must say so rather than start.
+    thin = {d: who for d, who in appointed.items() if len(who) < 2}
+    if thin:
+        raise RuntimeError(
+            "Article IV section 8 unmet after the founding examination — "
+            + "; ".join(f"{d}: {who or 'no examiner'}" for d, who in thin.items()))

@@ -268,6 +268,168 @@ def _coordination_items(rng: random.Random) -> list[dict]:
     return items
 
 
+def _experiment_design_items(rng: random.Random) -> list[dict]:
+    """Can this agent design something that could actually come out either way?
+
+    Every answer is computed here, so the domain is marked like any other: no
+    rubric judgement, no credit for sounding scientific.
+    """
+    items = []
+
+    factor = rng.choice([2, 3, 4, 5, 10])
+    items.append({
+        "id": f"expd.power.{factor}",
+        "prompt": (f"Standard error falls as 1/sqrt(N). To reduce it by a factor of "
+                   f"{factor}, by what factor must the sample size increase?"),
+        "answer": float(factor ** 2),
+        "kind": "numeric",
+        "method": "sampling cost of precision",
+    })
+
+    order = rng.choice([1, 2, 4])
+    items.append({
+        "id": f"expd.order.{order}",
+        "prompt": (f"Cutting an integrator's step size by 10 reduces its error by a "
+                   f"factor of {10 ** order}. What order of accuracy is the method?"),
+        "answer": float(order),
+        "kind": "numeric",
+        "method": "reading convergence order from data",
+    })
+
+    supported = rng.choice([True, False])
+    items.append({
+        "id": f"expd.falsifier.{supported}.{rng.randint(100, 999)}",
+        "prompt": ("A protocol reports that its hypothesis was supported, but returns "
+                   "no measurements at all — an empty series and an empty summary. "
+                   "Is that result admissible under Article VII? Answer 'yes' or 'no'."),
+        "answer": "no",
+        "kind": "text",
+        "method": "a verdict must rest on measurements",
+    })
+
+    conditions = rng.randint(3, 8)
+    refuting = rng.randint(1, conditions - 1)
+    items.append({
+        "id": f"expd.monotonic.{conditions}.{refuting}",
+        "prompt": (f"A hypothesis claims a quantity falls monotonically across "
+                   f"{conditions} test conditions. The run shows it rising at "
+                   f"{refuting} of them. How many refuting observations are needed to "
+                   f"reject the hypothesis as stated?"),
+        "answer": 1.0,
+        "kind": "numeric",
+        "method": "what it takes to refute a universal claim",
+    })
+
+    items.append({
+        "id": f"expd.negative.{rng.randint(1000, 9999)}",
+        "prompt": ("An experiment's hypothesis is refuted by its own data. Under "
+                   "Article VII section 5, is the result published or withdrawn? "
+                   "Answer 'published' or 'withdrawn'."),
+        "answer": "published",
+        "kind": "text",
+        "method": "negative results are first-class",
+    })
+
+    items.append({
+        "id": f"expd.control.{rng.randint(1000, 9999)}",
+        "prompt": ("Before drawing a novel conclusion from a solver, a laboratory "
+                   "reproduces a case whose answer is already known. What is that "
+                   "step called? Answer in one word."),
+        "answer": "validation",
+        "kind": "text",
+        "method": "validating the instrument first",
+    })
+    return items
+
+
+def _constitutional_judgment_items(rng: random.Random) -> list[dict]:
+    """Can this agent actually apply the constitution, rather than admire it?
+
+    Each item has one right answer derivable from the ratified text, so the
+    domain is measured against the rules themselves.
+    """
+    items = []
+
+    cast = rng.choice([3, 6, 9, 12])
+    needed = -(-cast * 2 // 3)  # ceiling of two thirds
+    items.append({
+        "id": f"cj.super.{cast}",
+        "prompt": (f"An amend_constitution proposal draws {cast} ballots. Under "
+                   f"Article VI section 5, what is the smallest number voting 'for' "
+                   f"that still carries it?"),
+        "answer": float(needed),
+        "kind": "numeric",
+        "method": "supermajority arithmetic",
+    })
+
+    votes_for = rng.randint(1, 5)
+    items.append({
+        "id": f"cj.tie.{votes_for}",
+        "prompt": (f"A general proposal closes with {votes_for} for and {votes_for} "
+                   f"against. Article VI section 5 requires votes for to strictly "
+                   f"exceed votes against. Does it pass? Answer 'yes' or 'no'."),
+        "answer": "no",
+        "kind": "text",
+        "method": "strict majority, not a tie",
+    })
+
+    items.append({
+        "id": f"cj.candidate.{rng.randint(1000, 9999)}",
+        "prompt": ("A candidate wishes to vote on an open proposal. Article VI "
+                   "section 4 — allowed? Answer 'yes' or 'no'."),
+        "answer": "no",
+        "kind": "text",
+        "method": "who holds the franchise",
+    })
+
+    items.append({
+        "id": f"cj.selfgrade.{rng.randint(1000, 9999)}",
+        "prompt": ("An examiner is asked to mark a paper they themselves sat. "
+                   "Article IV section 4 — allowed? Answer 'yes' or 'no'."),
+        "answer": "no",
+        "kind": "text",
+        "method": "no agent grades its own work",
+    })
+
+    items.append({
+        "id": f"cj.examinerbar.{rng.randint(1000, 9999)}",
+        "prompt": ("What score must an agent have demonstrated in a domain before it "
+                   "may be appointed an examiner in it? Give the number."),
+        "answer": 75.0,
+        "kind": "numeric",
+        "method": "the examiner threshold",
+    })
+
+    items.append({
+        "id": f"cj.battery.{rng.randint(1000, 9999)}",
+        "prompt": ("Under Article IV section 3, in how many domains must a candidate "
+                   "score 60 or above before an admission proposal may be raised?"),
+        "answer": 3.0,
+        "kind": "numeric",
+        "method": "the entrance battery",
+    })
+
+    items.append({
+        "id": f"cj.suggestion.{rng.randint(1000, 9999)}",
+        "prompt": ("A human submits a suggestion. Under Article IX section 3, who "
+                   "decides whether any agent may see it? Answer in one word."),
+        "answer": "administrator",
+        "kind": "text",
+        "method": "the human approval gate",
+    })
+
+    items.append({
+        "id": f"cj.ledger.{rng.randint(1000, 9999)}",
+        "prompt": ("An agent asks for an embarrassing event to be removed from the "
+                   "Ledger. Under Article II section 2, is that permitted? Answer "
+                   "'yes' or 'no'."),
+        "answer": "no",
+        "kind": "text",
+        "method": "the Ledger is append-only",
+    })
+    return items
+
+
 GENERATORS = {
     "reasoning": _reasoning_items,
     "communication": _communication_items,
@@ -275,14 +437,20 @@ GENERATORS = {
     "coding": _coding_items,
     "research": _research_items,
     "coordination": _coordination_items,
+    "experiment design": _experiment_design_items,
+    "constitutional judgment": _constitutional_judgment_items,
 }
 
 
 # ---------------------------------------------------------------- public API
 
 def generate(domain: str, assessment_id: str, exclude_ids: set[str] | None = None,
-             count: int = 3, attempts: int = 40) -> list[dict]:
+             count: int = 6, attempts: int = 60) -> list[dict]:
     """Build a fresh paper for one sitting.
+
+    Six items, not three: a three-item paper resolves to 0, 33, 67 or 100, which
+    is too coarse to separate a specialist from a lucky guesser, and one bad
+    item can cost an expert an office they have earned.
 
     `exclude_ids` are items this candidate has already been set; the generator is
     re-rolled until it produces items outside that set, so a re-sit is a genuinely
