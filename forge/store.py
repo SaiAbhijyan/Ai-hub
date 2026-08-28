@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -52,6 +54,30 @@ PROJECTION_TABLES = [
 ]
 
 
+def remove_tree(path: str, attempts: int = 10, pause: float = 0.05) -> None:
+    """Delete a directory, retrying briefly. The companion to `Store.close()`.
+
+    Closing the connection is what actually releases the database files; this
+    only covers the short window on Windows where a virus scanner or the search
+    indexer still holds a handle on a file that was open a moment ago.
+
+    Bounded on purpose — ten attempts, fifty milliseconds apart, half a second at
+    worst — and never an unbounded wait. A directory that still will not go is
+    left behind rather than raised: by the time cleanup runs the caller's work is
+    finished, and throwing away a completed result over a failed delete is
+    precisely the defect this exists to remove.
+    """
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                shutil.rmtree(path, ignore_errors=True)
+                return
+            time.sleep(pause)
+
+
 def canonical(payload: dict) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -74,6 +100,23 @@ class Store:
             self.conn.executescript(schema)
         # Called with the event dict after each successful append (e.g. SSE fanout).
         self.listeners: list[Callable[[dict], None]] = []
+
+    def close(self) -> None:
+        """Release the database files.
+
+        In WAL mode SQLite holds three handles — the database, the `-wal` and the
+        `-shm` — and keeps them until the connection is closed. POSIX lets you
+        unlink an open file, so on Linux a caller can get away with never calling
+        this; Windows refuses, and a throwaway Store whose directory is then
+        deleted fails with WinError 32. The Store owns the connection, so the
+        Store is what closes it.
+
+        Idempotent: closing twice is not an error, so a `finally` may call it
+        without first checking.
+        """
+        self.listeners.clear()
+        with self._lock:
+            self.conn.close()
 
     # ------------------------------------------------------------------ ledger
 

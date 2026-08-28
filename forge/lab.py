@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from . import protocols
+from .store import remove_tree
 
 DEFAULT_TIMEOUT = float(os.environ.get("FORGE_PROTOCOL_TIMEOUT", "120"))
 MEMORY_LIMIT_MB = int(os.environ.get("FORGE_PROTOCOL_MEMORY_MB", "1024"))
@@ -56,7 +57,12 @@ def run_protocol(protocol_id: str, params: dict | None = None,
 
     timeout = timeout or DEFAULT_TIMEOUT
     started = time.time()
-    with tempfile.TemporaryDirectory() as workdir:
+    # mkdtemp with an explicit cleanup rather than TemporaryDirectory: the child
+    # has exited by the time we delete, but on Windows a handle can linger for a
+    # moment in a directory that was just a process's working directory, and a
+    # raised cleanup error here would fail every protocol rather than one.
+    workdir = tempfile.mkdtemp(prefix="forge-run-")
+    try:
         try:
             completed = subprocess.run(
                 [sys.executable, "-m", "forge.lab", protocol_id, json.dumps(clean)],
@@ -71,6 +77,8 @@ def run_protocol(protocol_id: str, params: dict | None = None,
         except Exception as exc:  # pragma: no cover - defensive
             return _failure(protocol_id, clean, f"could not start: {exc}",
                             elapsed=time.time() - started)
+    finally:
+        remove_tree(workdir)
 
     elapsed = time.time() - started
     if completed.returncode != 0:

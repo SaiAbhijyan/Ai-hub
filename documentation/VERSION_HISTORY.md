@@ -1,7 +1,7 @@
 # The Forge — version history and build record
 
 *Repository: `SaiAbhijyan/Ai-hub` · branch `claude/open-ended-project-v3ff92`*
-*Last updated for v2.3 — exports, idle, and harder exams.*
+*Last updated for v2.3.1 — the WinError 32 fix.*
 
 This document records what the Forge is, how it came to exist, what was built at
 each stage, and what is deliberately not built yet. It is written so that someone
@@ -455,6 +455,42 @@ held and the deferral is written down.
 
 ---
 
+### Stage 6 — v2.3.1: the WinError 32 fix (2026-08-27)
+
+The one red test on Windows, closed. `test_every_protocol_executes_and_measures`
+failed there because the three `forge.*` protocols each built a throwaway Ledger
+inside `tempfile.TemporaryDirectory()` and never closed the connection.
+
+**What was actually wrong.** A `Store` runs in WAL mode, so it holds *three* open
+handles — the database, the `-wal` and the `-shm`. POSIX lets you unlink an open
+file, so on Linux forgetting to close is invisible and the test passed. Windows
+refuses, `TemporaryDirectory.__exit__` raised `PermissionError`, that propagated
+out of the protocol, the child process exited non-zero and `run_protocol` turned
+a *completed* run into a failure record. The measurements were fine the whole
+time; the cleanup was throwing them away.
+
+**The fix.** `Store.close()` — the Store owns the connection, so the Store
+releases it — plus a `_throwaway_ledger` context manager that closes before it
+deletes, and a bounded `remove_tree` (ten attempts, fifty milliseconds apart,
+never an unbounded wait) for the moment on Windows where a scanner still holds a
+handle. The same removal now covers the runner's own working directory in
+`forge/lab.py`, where a lingering handle would have failed every protocol rather
+than three. Not one line of measurement logic changed: same questions, same
+`supported` computation, same falsifiers, and `forge.tamper_detection` returns
+the identical result hash it did before.
+
+**Why the guard is written the way it is.** Asserting that `rmtree` succeeds
+proves nothing on Linux, where it succeeds with the handles still open — which is
+exactly why this only ever showed on Windows. So the new test asserts the real
+condition instead: every Store a protocol opens is closed by the time it returns,
+and every temporary directory it made is gone. Reintroducing the leak fails all
+three parametrised cases here, which is what makes the fix checkable from a Linux
+machine at all.
+
+The three protocols stay tagged **frontier**. The runner no longer crashes, but a
+claim about the Forge's own systems is not settled on a platform until a
+completed result exists on that platform.
+
 ## 4. Current state
 
 | Measure | Value |
@@ -466,13 +502,13 @@ held and the deferral is written down.
 | Agents | 21 written personas, 17 distinct voices |
 | Laboratories | 7 domain labs + the Academy |
 | Action vocabulary | 18 validated action types, 6 engine-written |
-| Tests | 122 passing, 1 skipped (29 core, 42 research integrity, 52 web) |
+| Tests | 127 passing, 1 skipped (29 core, 47 research integrity, 52 web) |
 | Python | ~6,800 lines, standard library only for all science |
 | Runtime dependencies | FastAPI, Uvicorn, Jinja2, python-multipart (Anthropic SDK optional) |
 
 **Verified end-to-end from a clean clone:** genesis runs, the chain verifies, a
 published experiment reproduces hash-for-hash, tampering with one payload is
-detected at the exact event, every page renders, and all 122 tests pass.
+detected at the exact event, every page renders, and all 127 tests pass.
 
 ### What has been achieved against the original brief
 
@@ -565,7 +601,7 @@ python -m forge run          # genesis runs automatically; open http://localhost
 python -m forge protocols    # list the protocol library
 python -m forge verify       # re-walk and re-hash the entire chain
 python -m forge reproduce <experiment_id>
-pytest                       # 122 tests, ~4 minutes (protocols really execute)
+pytest                       # 127 tests, ~4 minutes (protocols really execute)
 ```
 
 **Adding a protocol** is the main way to extend the Forge: write one function in

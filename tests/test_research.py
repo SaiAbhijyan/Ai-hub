@@ -764,3 +764,108 @@ def test_genesis_still_seats_two_examiners_in_every_domain(tmp_path):
             by_domain[domain].append(agent["name"])
     thin = {d: who for d, who in by_domain.items() if len(who) < 2}
     assert not thin, thin
+
+
+# ---------------------------------------------- temp ledgers and file handles
+
+def test_a_closed_ledger_releases_its_files(tmp_path):
+    """The literal failure mode behind WinError 32.
+
+    A Store in WAL mode holds three open handles — the database, the `-wal` and
+    the `-shm`. POSIX lets you unlink an open file, so on Linux forgetting to
+    close is invisible; Windows refuses, and a throwaway Store whose directory is
+    then deleted takes a finished measurement down with it.
+    """
+    import shutil
+    import sqlite3
+
+    from forge.store import Store, remove_tree
+
+    workdir = tmp_path / "ledger"
+    workdir.mkdir()
+    store = Store(workdir / "bench.db")
+    store.append("bench", "post_message", {"text": "hello"}, tick=0)
+    assert store.verify_chain()["ok"]
+
+    # Open: the database plus both WAL sidecars.
+    while_open = {p.name for p in workdir.iterdir()}
+    assert while_open == {"bench.db", "bench.db-wal", "bench.db-shm"}, while_open
+
+    store.close()
+    assert {p.name for p in workdir.iterdir()} == {"bench.db"}
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.conn.execute("SELECT 1")
+    store.close()          # idempotent: a finally may call it without checking
+
+    remove_tree(str(workdir))
+    assert not workdir.exists()
+    shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_remove_tree_is_bounded_and_never_raises(tmp_path, monkeypatch):
+    """The retry covers a handle that lingers for a moment, not one that never
+    goes. It must give up rather than wait for ever, and must not raise — the
+    caller's measurement is already complete by the time cleanup runs."""
+    import shutil
+
+    from forge.store import remove_tree
+
+    tried, gave_up, slept = [], [], []
+
+    def always_busy(path, ignore_errors=False):
+        if ignore_errors:
+            gave_up.append(path)
+            return
+        tried.append(path)
+        raise PermissionError(32, "The process cannot access the file")
+
+    monkeypatch.setattr(shutil, "rmtree", always_busy)
+    monkeypatch.setattr("forge.store.time.sleep", lambda s: slept.append(s))
+
+    remove_tree(str(tmp_path))          # must return, not raise
+    assert len(tried) == 10, tried      # ten real attempts, then it stops
+    assert len(gave_up) == 1            # and gives up quietly rather than raising
+    assert len(slept) == 9 and sum(slept) < 1.0, slept
+
+
+@pytest.mark.parametrize("protocol_id, kwargs", [
+    ("forge.tamper_detection", {"trials": 2}),
+    ("forge.verification_cost", {"max_events": 500}),
+    ("forge.rebuild_fidelity", {"events": 100}),
+])
+def test_forge_protocols_close_every_ledger_they_open(protocol_id, kwargs, monkeypatch):
+    """The regression guard, and the reason it is written this way.
+
+    Asserting that `rmtree` succeeds proves nothing on Linux, where it succeeds
+    with the handles still open — which is exactly why this bug only ever showed
+    on Windows. So assert the real condition instead: every Store the protocol
+    opened is closed by the time it returns, and every temporary directory it
+    made is gone. That fails on any platform if the connection leaks.
+    """
+    import os
+    import sqlite3
+
+    import forge.store as store_mod
+
+    opened, made = [], []
+    real = store_mod.Store
+
+    class Tracked(real):
+        def __init__(self, path):
+            super().__init__(path)
+            opened.append(self)
+            made.append(os.path.dirname(str(path)))
+
+    # The protocols import Store inside the function, so this takes effect.
+    monkeypatch.setattr(store_mod, "Store", Tracked)
+    results = protocols.get(protocol_id)["fn"](**kwargs)
+
+    assert opened, f"{protocol_id} opened no ledger — the guard is not watching it"
+    for store in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            store.conn.execute("SELECT 1")
+    assert not [d for d in set(made) if os.path.exists(d)], "temp directory left behind"
+
+    # And the science is untouched: it still measures and still decides.
+    assert "supported" in results and "conclusion" in results
+    assert results["series"] or results["summary"]
