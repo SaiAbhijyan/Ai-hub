@@ -7,9 +7,31 @@ them.
 
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import time
 from pathlib import Path
+
+
+@contextlib.contextmanager
+def _throwaway_ledger(filename: str):
+    """A real Store in a temporary directory, closed before the directory goes.
+
+    In WAL mode a Store holds three open handles — the database, the `-wal` and
+    the `-shm`. POSIX allows unlinking an open file, so on Linux forgetting to
+    close is invisible; on Windows the delete fails with WinError 32 and takes a
+    completed measurement down with it. Closing first, deleting second, is the
+    whole of the fix.
+    """
+    from ..store import Store, remove_tree
+
+    tmp = tempfile.mkdtemp(prefix="forge-bench-")
+    store = Store(Path(tmp) / filename)
+    try:
+        yield store
+    finally:
+        store.close()
+        remove_tree(tmp)
 
 
 def chain_verification_cost(max_events: int = 1500) -> dict:
@@ -19,10 +41,7 @@ def chain_verification_cost(max_events: int = 1500) -> dict:
     function the site calls — is timed at increasing lengths. Verification re-hashes
     every event, so cost should be linear in chain length.
     """
-    from ..store import Store
-
-    with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "bench.db")
+    with _throwaway_ledger("bench.db") as store:
         series = []
         written = 0
         target = 250
@@ -79,15 +98,14 @@ def projection_rebuild_fidelity(events: int = 250) -> dict:
     from ..agents import SimulatedAgent
     from ..engine import Engine
     from ..seed import seed as run_genesis
-    from ..store import PROJECTION_TABLES, Store
+    from ..store import PROJECTION_TABLES
 
     # The inner Forge exists to generate a realistic ledger to replay, not to do
     # science of its own — without this it would run protocols recursively.
     previous = os.environ.get("FORGE_NO_PROTOCOLS")
     os.environ["FORGE_NO_PROTOCOLS"] = "1"
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Store(Path(tmp) / "fidelity.db")
+        with _throwaway_ledger("fidelity.db") as store:
             run_genesis(store)
             engine = Engine(store, SimulatedAgent())
             guard = 0
@@ -150,13 +168,12 @@ def tamper_detection_sensitivity(trials: int = 12) -> dict:
     """
     import random
 
-    from ..store import Store
-
     caught = 0
     series = []
     for trial in range(trials):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Store(Path(tmp) / f"tamper{trial}.db")
+        # Closed and removed inside the loop, so twelve trials never hold twelve
+        # open ledgers at once.
+        with _throwaway_ledger(f"tamper{trial}.db") as store:
             for i in range(60):
                 store.append("bench", "post_message", {"text": f"original message {i}"}, tick=i)
             rng = random.Random(trial)
@@ -206,8 +223,10 @@ PROTOCOLS = [
         "falsifier": "A failed verification at any chain length, or a "
                       "per-event cost varying by 3x or more across "
                       "lengths, refutes it.",
-        # Frontier because it does not yet pass on every platform:
-        # the Windows run fails, so the claim is not settled.
+        # Still frontier. The question is about this machine as much as the
+        # code: a claim about the Forge's own systems is not settled on a
+        # platform until a completed result exists on that platform. Fixing the
+        # file handles let the run finish; it did not answer the question.
         "kind": "frontier",
         "params": {
             "max_events": {"type": "int", "min": 500, "max": 20000, "default": 1500,
@@ -223,8 +242,10 @@ PROTOCOLS = [
         "hypothesis": "Every projection table is byte-identical after a full replay, as Article II section 4 requires.",
         "falsifier": "One projection table that differs after a full "
                       "replay from the Ledger refutes it.",
-        # Frontier because it does not yet pass on every platform:
-        # the Windows run fails, so the claim is not settled.
+        # Still frontier. The question is about this machine as much as the
+        # code: a claim about the Forge's own systems is not settled on a
+        # platform until a completed result exists on that platform. Fixing the
+        # file handles let the run finish; it did not answer the question.
         "kind": "frontier",
         "params": {
             "events": {"type": "int", "min": 100, "max": 3000, "default": 250,
@@ -240,8 +261,10 @@ PROTOCOLS = [
         "hypothesis": "Every single-event forgery is detected by chain verification.",
         "falsifier": "A single forged event that chain verification does "
                       "not catch refutes it.",
-        # Frontier because it does not yet pass on every platform:
-        # the Windows run fails, so the claim is not settled.
+        # Still frontier. The question is about this machine as much as the
+        # code: a claim about the Forge's own systems is not settled on a
+        # platform until a completed result exists on that platform. Fixing the
+        # file handles let the run finish; it did not answer the question.
         "kind": "frontier",
         "params": {
             "trials": {"type": "int", "min": 5, "max": 100, "default": 12,
