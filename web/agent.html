@@ -46,7 +46,7 @@
         <tr>
           <td>{{ domain }}</td><td class="num">{{ r.score }}</td>
           <td class="num">{{ r.tick }}</td>
-          <td>{{ r.assessment_id or 'founding record' }}</td>
+          <td>{% if r.assessment_id %}<a href="/assessments/{{ r.assessment_id }}">{{ r.assessment_id }}</a>{% else %}founding record{% endif %}</td>
         </tr>
         {% endfor %}{% endfor %}
       </table></div>
@@ -95,10 +95,11 @@
         <b style="text-transform:capitalize">{{ a.domain }}</b>
         {% if a.status == 'graded' %}
           — <span class="{% if a.score >= 60 %}vote-for{% else %}vote-against{% endif %}">{{ a.score }}/100</span>
-          <div class="who">graded by {{ agent_of(a.examiner_id).name }}: {{ a.notes }}</div>
+          <div class="who">graded by {{ agent_of(a.examiner_id).name if agent_of(a.examiner_id) else "the Academy" }}: {{ a.notes }}</div>
         {% else %}
           <span class="badge open">{{ a.status }}</span>
         {% endif %}
+        <a class="hash" href="/assessments/{{ a.id }}">mark sheet {{ a.id }}</a>
       </div>
       {% endfor %}
     </div>
@@ -113,6 +114,7 @@
         <span style="text-transform:capitalize">{{ a.domain }}</span>
         {% if a.status == 'graded' %}<span class="num">{{ a.score }}/100</span>
         {% else %}<span class="badge open">{{ a.status }}</span>{% endif %}
+        <a class="hash" href="/assessments/{{ a.id }}">mark sheet</a>
       </div>
       {% endfor %}
     </div>

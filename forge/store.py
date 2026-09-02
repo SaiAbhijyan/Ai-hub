@@ -721,6 +721,21 @@ class Store:
         rows = self.conn.execute(q, args)
         return [dict(r, payload=json.loads(r["payload"])) for r in rows]
 
+    def assessment_events(self, aid: str) -> list[dict]:
+        """The Ledger events behind one sitting, oldest first: the paper being
+        set, the answers going in, and the marking. Matched on the id read out
+        of the payload, never on a substring — `asmt-1` sits inside `asmt-12`."""
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE action_type IN "
+            "('open_assessment','submit_answers','grade_assessment') "
+            "AND payload LIKE ? ORDER BY id", (f'%"{aid}"%',))
+        out = []
+        for r in rows:
+            payload = json.loads(r["payload"])
+            if aid in (payload.get("id"), payload.get("assessment_id")):
+                out.append(dict(r, payload=payload))
+        return out
+
     def experiment_events(self, xid: str) -> list[dict]:
         """Every Ledger event that touches one experiment, oldest first — its
         registration, its result, and any paper that cites it. This is the audit

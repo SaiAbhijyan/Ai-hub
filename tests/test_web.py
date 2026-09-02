@@ -857,3 +857,102 @@ def test_a_lapsed_post_is_re_earned_on_a_harder_paper(tmp_path):
                for c in ctx2["examiner_candidates"]), (
         "a re-earned domain must be movable again, or the route back is closed")
     assert store.verify_chain()["ok"]
+
+
+# ------------------------------------------------ public assessment transcripts
+
+def _graded_sitting(store, candidate="wren"):
+    return next(a for a in store.assessments(candidate_id=candidate)
+                if a["status"] == "graded" and a["marks"])
+
+
+def test_a_sitting_page_shows_the_marks_the_engine_graded(client, store):
+    """Open a Wren sitting and see the actual mark sheet — the prompts the
+    candidate saw, the answers given, the answers expected, and the marks."""
+    a = _graded_sitting(store, "wren")
+    html = client.get(f"/assessments/{a['id']}").text
+    body = client.get(f"/api/assessments/{a['id']}").json()
+
+    assert body["id"] == a["id"] and body["score"] == a["score"]
+    assert body["candidate"]["name"] == "Wren Ashcombe"
+    assert body["domain"] == a["domain"] and body["sitting"] == a["sitting"]
+    assert body["band"] == a["band"]
+    assert body["events"], "the sitting's ledger events are listed"
+    for e in body["events"]:
+        assert f'/events/{e["id"]}' in html
+
+    # The JSON mark sheet is the store's marks joined to the store's items.
+    stored = {i["id"]: i for i in a["items"]}
+    assert len(body["items"]) == len(a["marks"])
+    for row, mark in zip(body["items"], a["marks"]):
+        assert row["item_id"] == mark["item_id"]
+        assert row["given"] == mark["given"]
+        assert row["expected"] == mark["expected"]
+        assert row["correct"] == mark["correct"]
+        assert row["method"] == mark["method"]
+        assert row["prompt"] == stored[mark["item_id"]]["prompt"]
+        # And every one of those reaches the page.
+        assert row["item_id"] in html
+        assert str(row["given"]) in html and str(row["expected"]) in html
+        assert row["prompt"] in html.replace("&#39;", "'").replace("&quot;", '"')
+
+
+def test_a_transcript_invents_nothing(client, store):
+    """Every prompt on the page is one the store holds, and the page carries no
+    generated narrative of any kind."""
+    a = _graded_sitting(store, "wren")
+    body = client.get(f"/api/assessments/{a['id']}").json()
+    stored = {i["prompt"] for i in a["items"]}
+    assert stored and all(r["prompt"] in stored for r in body["items"])
+
+    html = client.get(f"/assessments/{a['id']}").text.lower()
+    forged = "the candidate showed a strong grasp of the material"
+    assert forged not in html
+    for narrative in ("strengths", "weaknesses", "overall impression"):
+        assert narrative not in html, narrative
+
+
+def test_a_missing_prompt_is_labelled_not_reconstructed(tmp_path):
+    """An old row whose mark names an item the row does not carry: the prompt is
+    null and the page says so in the specified words. No question is invented."""
+    from forge.seed import seed as seed_store
+
+    store = Store(tmp_path / "f.db")
+    seed_store(store)
+    examiner = next(a for a in store.agents(standing="examiner")
+                    if "coding" in a["examiner_domains"])
+    candidate = next(a for a in store.agents() if a["id"] not in (examiner["id"], "aide"))
+    store.append(examiner["id"], "open_assessment", {
+        "id": "asmt-legacy", "candidate_id": candidate["id"], "domain": "coding",
+        "items": [], "tasks": [], "sitting": 9, "band": 1})
+    store.append(candidate["id"], "submit_answers",
+                 {"assessment_id": "asmt-legacy", "answers": ["7"]})
+    store.append(examiner["id"], "grade_assessment", {
+        "assessment_id": "asmt-legacy", "score": 100, "notes": "legacy row",
+        "marks": [{"item_id": "code.old.1", "expected": 7.0, "given": "7",
+                   "correct": True, "method": "arithmetic"}]})
+
+    with TestClient(create_app(store, engine=None)) as client:
+        body = client.get("/api/assessments/asmt-legacy").json()
+        html = client.get("/assessments/asmt-legacy").text
+    assert body["items"] == [{"item_id": "code.old.1", "prompt": None, "given": "7",
+                              "expected": 7.0, "correct": True, "method": "arithmetic"}]
+    assert "prompt not stored for this sitting" in html
+    assert "code.old.1" in html
+
+
+def test_unknown_sittings_are_404(client):
+    assert client.get("/assessments/nope").status_code == 404
+    assert client.get("/api/assessments/nope").status_code == 404
+
+
+def test_transcripts_are_linked_from_where_sittings_are_listed(client, store):
+    a = _graded_sitting(store, "wren")
+    link = f"/assessments/{a['id']}"
+    assert link in client.get("/agents/wren").text
+    assert link in client.get("/academy").text or any(
+        f"/assessments/{x['id']}" in client.get("/academy").text
+        for x in store.assessments())
+    rows = client.get("/api/assessments").json()
+    row = next(r for r in rows if r["id"] == a["id"])
+    assert row["url"] == link and row["api"] == f"/api/assessments/{a['id']}"

@@ -1,7 +1,7 @@
 # The Forge — version history and build record
 
 *Repository: `SaiAbhijyan/Ai-hub` · branch `claude/open-ended-project-v3ff92`*
-*Last updated for v2.3.1 — the WinError 32 fix.*
+*Last updated for v2.3.2 — public assessment transcripts.*
 
 This document records what the Forge is, how it came to exist, what was built at
 each stage, and what is deliberately not built yet. It is written so that someone
@@ -491,6 +491,35 @@ The three protocols stay tagged **frontier**. The runner no longer crashes, but 
 claim about the Forge's own systems is not settled on a platform until a
 completed result exists on that platform.
 
+### Stage 7 — v2.3.2: public assessment transcripts (2026-08-27)
+
+A score on a profile was a number with a note beside it. A human could not open
+the sitting and see the questions, the answers given, the answers expected, and
+which were marked right — the mark sheet that *is* the score.
+
+**What was already there.** Every sitting since Pack 1 stores its full
+transcript: `items` carries the prompt the candidate saw, `marks` carries
+expected, given and correct per item, aligned by id. Nothing new is persisted;
+this pack makes the record readable.
+
+**What was built.** `GET /assessments/{id}` for humans and
+`GET /api/assessments/{id}` for anyone, both produced by one `transcript()`
+function so page and JSON cannot disagree. The page shows candidate, examiner,
+domain, band, sitting, score, ticks and the three Ledger events, then the mark
+sheet as a table — `item_id`, prompt, given, expected, correct, method — and
+nothing else. No strengths-and-weaknesses essay; the examiner's stored note is
+shown verbatim as a field because it is on the Ledger, and no text is generated.
+A mark whose item the row does not carry gets `prompt: null` and the words
+*"prompt not stored for this sitting"* — the question is never reconstructed. A
+test writes exactly such a row and checks the label. Unknown ids return 404 on
+both routes. Sittings are linked from the profile's score history and both
+sitting lists, from the Academy's recent-assessments table, and as `url`/`api`
+fields on the `/api/assessments` list.
+
+**One bug fixed in passing.** The profile rendered "graded by :" for founding
+papers, because it called `.name` on the examiner `forge`, which is not an agent.
+It now says "the Academy", as the Academy page already did.
+
 ## 4. Current state
 
 | Measure | Value |
@@ -502,13 +531,13 @@ completed result exists on that platform.
 | Agents | 21 written personas, 17 distinct voices |
 | Laboratories | 7 domain labs + the Academy |
 | Action vocabulary | 18 validated action types, 6 engine-written |
-| Tests | 127 passing, 1 skipped (29 core, 47 research integrity, 52 web) |
+| Tests | 132 passing, 1 skipped (29 core, 47 research integrity, 57 web) |
 | Python | ~6,800 lines, standard library only for all science |
 | Runtime dependencies | FastAPI, Uvicorn, Jinja2, python-multipart (Anthropic SDK optional) |
 
 **Verified end-to-end from a clean clone:** genesis runs, the chain verifies, a
 published experiment reproduces hash-for-hash, tampering with one payload is
-detected at the exact event, every page renders, and all 127 tests pass.
+detected at the exact event, every page renders, and all 132 tests pass.
 
 ### What has been achieved against the original brief
 
@@ -601,7 +630,7 @@ python -m forge run          # genesis runs automatically; open http://localhost
 python -m forge protocols    # list the protocol library
 python -m forge verify       # re-walk and re-hash the entire chain
 python -m forge reproduce <experiment_id>
-pytest                       # 127 tests, ~4 minutes (protocols really execute)
+pytest                       # 132 tests, ~4 minutes (protocols really execute)
 ```
 
 **Adding a protocol** is the main way to extend the Forge: write one function in

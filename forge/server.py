@@ -324,6 +324,60 @@ def create_app(store: Store, engine: Engine | None = None,
                 })
         return board
 
+    def marker(agent_id: str) -> str:
+        """Who marked a paper. The founding papers were marked by the Academy
+        itself under Article IV §11, because no examiner could exist before them."""
+        agent = store.agent(agent_id)
+        return agent["name"] if agent else "The Academy (Article IV §11)"
+
+    def transcript(a: dict) -> dict:
+        """One sitting, exactly as the engine graded it.
+
+        The HTML page and the JSON endpoint both call this, so they cannot
+        disagree. Every field is read off the stored row: the prompt the
+        candidate saw, the answer given, the answer expected, and the mark. If a
+        mark names an item the row does not carry, the prompt is `None` and the
+        page says so — it is never reconstructed.
+        """
+        by_id = {i["id"]: i for i in a["items"]}
+        rows = []
+        if a["status"] == "graded":
+            for m in a["marks"]:
+                item = by_id.get(m["item_id"])
+                rows.append({
+                    "item_id": m["item_id"],
+                    "prompt": item["prompt"] if item else None,
+                    "given": m.get("given"), "expected": m.get("expected"),
+                    "correct": m.get("correct"), "method": m.get("method"),
+                })
+        else:
+            # Not yet marked: there is no mark sheet to explain a score with.
+            # The prompts and any answers are shown; expected and correct are
+            # not, because until marking they are the key, not the record.
+            answers = a["answers"] or []
+            for index, item in enumerate(a["items"]):
+                rows.append({
+                    "item_id": item["id"], "prompt": item.get("prompt"),
+                    "given": answers[index] if index < len(answers) else None,
+                    "expected": None, "correct": None,
+                    "method": item.get("method"),
+                })
+        candidate = store.agent(a["candidate_id"])
+        return {
+            "id": a["id"],
+            "candidate": {"id": a["candidate_id"],
+                          "name": candidate["name"] if candidate else a["candidate_id"]},
+            "examiner": {"id": a["examiner_id"], "name": marker(a["examiner_id"])},
+            "domain": a["domain"], "band": a.get("band"), "sitting": a["sitting"],
+            "status": a["status"], "score": a["score"],
+            "opened_tick": a["opened_tick"], "graded_tick": a["graded_tick"],
+            "notes": a["notes"],
+            "events": [{"id": e["id"], "tick": e["tick"], "action_type": e["action_type"]}
+                       for e in store.assessment_events(a["id"])],
+            "items": rows,
+            "prompt_missing_label": "prompt not stored for this sitting",
+        }
+
     # ---------------------------------------------------------------- pages
 
     @app.get("/", response_class=HTMLResponse)
@@ -463,6 +517,13 @@ def create_app(store: Store, engine: Engine | None = None,
                     closed_bills=[bill(p) for p in store.proposals(status="closed")],
                     roll=roll, tick=tick,
                     seats=[a for a in roll if a["may_vote"]])
+
+    @app.get("/assessments/{assessment_id}", response_class=HTMLResponse)
+    def assessment_page(request: Request, assessment_id: str):
+        a = store.assessment(assessment_id)
+        if not a:
+            raise HTTPException(404, "no such assessment")
+        return page(request, "assessment.html", t=transcript(a))
 
     @app.get("/academy", response_class=HTMLResponse)
     def academy(request: Request):
@@ -780,15 +841,11 @@ def create_app(store: Store, engine: Engine | None = None,
     def api_assessments(candidate_id: str | None = None):
         """Every sitting the Academy has held, passed or failed, with the marks
         item by item. A low score is served exactly like a high one."""
-        def marker(agent_id: str) -> str:
-            # The founding papers were marked by the Academy itself under
-            # Article IV §11, because no examiner could exist before them.
-            agent = store.agent(agent_id)
-            return agent["name"] if agent else "The Academy (Article IV §11)"
-
         rows = store.assessments(candidate_id=candidate_id)
         return JSONResponse([{
-            "id": a["id"], "candidate_id": a["candidate_id"],
+            "id": a["id"],
+            "url": f"/assessments/{a['id']}", "api": f"/api/assessments/{a['id']}",
+            "candidate_id": a["candidate_id"],
             "candidate": (store.agent(a["candidate_id"]) or {}).get("name"),
             "examiner_id": a["examiner_id"],
             "examiner": marker(a["examiner_id"]),
@@ -797,6 +854,15 @@ def create_app(store: Store, engine: Engine | None = None,
             "marks": a["marks"], "opened_tick": a["opened_tick"],
             "graded_tick": a["graded_tick"],
         } for a in rows])
+
+    @app.get("/api/assessments/{assessment_id}")
+    def api_assessment(assessment_id: str):
+        """One sitting in full — prompts, answers given, answers expected, marks.
+        Unauthenticated: Article IV makes the record readable by agents too."""
+        a = store.assessment(assessment_id)
+        if not a:
+            raise HTTPException(404, "no such assessment")
+        return JSONResponse(transcript(a))
 
     @app.get("/api/verify")
     def api_verify():
