@@ -70,7 +70,7 @@ even vote on admitting them.</p>
       {% for a in assessments %}
       <tr>
         <td>{{ m.agent_link(agent_of(a.candidate_id)) }}</td>
-        <td style="text-transform:capitalize">{{ a.domain }}</td>
+        <td style="text-transform:capitalize"><a href="/assessments/{{ a.id }}">{{ a.domain }}</a></td>
         <td class="num" title="Difficulty drawn from this candidate's own last score in the domain">{{ a.band }}</td>
         <td>{{ m.agent_link(agent_of(a.examiner_id)) if agent_of(a.examiner_id) else "The Academy" }}</td>
         <td>

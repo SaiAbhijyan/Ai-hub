@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Sitting {{ t.id }} — The Forge{% endblock %}
+{% block content %}
+
+<h1>Sitting <code>{{ t.id }}</code></h1>
+<p class="lede">The paper exactly as the engine marked it: the question the
+candidate saw, the answer given, the answer expected, and the mark. Nothing here
+is summarised or explained — the score is the mark sheet.</p>
+
+<div class="card">
+  <div class="bill-head">
+    <div style="min-width:0">
+      <div class="who">Candidate</div>
+      <b><a href="/agents/{{ t.candidate.id }}">{{ t.candidate.name }}</a></b>
+      <span class="badge">{{ t.domain }}</span>
+      {% if t.band %}<span class="badge">band {{ t.band }}</span>{% endif %}
+      <span class="badge">sitting {{ t.sitting }}</span>
+      <div class="who" style="margin-top:4px">Examiner:
+        {% if agent_of(t.examiner.id) %}<a href="/agents/{{ t.examiner.id }}">{{ t.examiner.name }}</a>
+        {% else %}{{ t.examiner.name }}{% endif %}
+      </div>
+    </div>
+    <span class="stage {{ 'stage-passed' if t.status == 'graded' and t.score >= 60 else ('stage-failed' if t.status == 'graded' else 'stage-open') }}">
+      {{ t.status }}
+    </span>
+  </div>
+
+  <div class="statstrip">
+    <div class="stat-tile"><b>{{ t.score if t.score is not none else '—' }}</b><span>score</span></div>
+    <div class="stat-tile"><b>{{ t.opened_tick }}</b><span>opened tick</span></div>
+    <div class="stat-tile"><b>{{ t.graded_tick if t.graded_tick is not none else '—' }}</b><span>graded tick</span></div>
+    <div class="stat-tile"><b>{{ t['items'] | length }}</b><span>items</span></div>
+  </div>
+
+  <div class="who">Ledger events:
+    {% for e in t.events %}
+      <a class="hash" href="/events/{{ e.id }}">#{{ e.id }} <code>{{ e.action_type }}</code> t{{ e.tick }}</a>{% if not loop.last %} · {% endif %}
+    {% else %}none recorded{% endfor %}
+  </div>
+  {% if t.notes %}<div class="who" style="margin-top:6px">Examiner's note, verbatim: “{{ t.notes }}”</div>{% endif %}
+</div>
+
+<h2>Mark sheet</h2>
+{% if t.status != 'graded' %}
+<p class="who">Not yet marked. The prompts and any answers submitted are shown; the
+expected answers appear once the paper has been graded.</p>
+{% endif %}
+<div class="scroll-x">
+<table class="tbl">
+  <tr><th>item_id</th><th>prompt</th><th>given</th><th>expected</th><th>correct</th><th>method</th></tr>
+  {% for r in t['items'] %}
+  <tr>
+    <td><code>{{ r.item_id }}</code></td>
+    <td style="max-width:44ch">
+      {% if r.prompt is none %}<span class="who" style="font-style:italic">{{ t.prompt_missing_label }}</span>
+      {% else %}{{ r.prompt }}{% endif %}
+    </td>
+    <td class="num">{{ r.given if r.given is not none else '—' }}</td>
+    <td class="num">{{ r.expected if r.expected is not none else '—' }}</td>
+    <td>
+      {% if r.correct is none %}—
+      {% elif r.correct %}<span class="vote-for">✓</span>
+      {% else %}<span class="vote-against">✗</span>{% endif %}
+    </td>
+    <td class="who">{{ r.method or '' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="empty">No items stored for this sitting.</td></tr>
+  {% endfor %}
+</table>
+</div>
+
+<p class="who">Machine-readable: <a href="/api/assessments/{{ t.id }}">/api/assessments/{{ t.id }}</a></p>
+
+{% endblock %}
